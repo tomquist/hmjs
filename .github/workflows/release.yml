@@ -1,0 +1,141 @@
+name: Release Packages
+
+on:
+  # Manual trigger with version selection
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prerelease
+      prerelease_id:
+        description: 'Prerelease identifier (for prerelease only)'
+        required: false
+        default: 'beta'
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        registry-url: 'https://npm.pkg.github.com'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run tests
+      run: npm test
+    
+    - name: Build packages
+      run: npm run build
+    
+    - name: Configure Git
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+    
+    - name: Bump version
+
+      run: |
+        if [ "${{ github.event.inputs.version }}" = "prerelease" ]; then
+          npm version prerelease --preid=${{ github.event.inputs.prerelease_id }} --workspaces --no-git-tag-version
+        else
+          npm version ${{ github.event.inputs.version }} --workspaces --no-git-tag-version
+        fi
+        
+        # Get new version
+        NEW_VERSION=$(node -p "require('./packages/protocol/package.json').version")
+        echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+        
+        # Commit version changes
+        git add .
+        git commit -m "chore: bump version to $NEW_VERSION"
+        git tag "v$NEW_VERSION"
+        git push origin main
+        git push origin "v$NEW_VERSION"
+    
+
+    
+    - name: Check if packages are already published
+      run: |
+        # Check if protocol version exists
+        if npm view @tomquist/hmjs-protocol@$NEW_VERSION > /dev/null 2>&1; then
+          echo "PROTOCOL_EXISTS=true" >> $GITHUB_ENV
+        else
+          echo "PROTOCOL_EXISTS=false" >> $GITHUB_ENV
+        fi
+        
+        # Check if ble version exists
+        if npm view @tomquist/hmjs-ble@$NEW_VERSION > /dev/null 2>&1; then
+          echo "BLE_EXISTS=true" >> $GITHUB_ENV
+        else
+          echo "BLE_EXISTS=false" >> $GITHUB_ENV
+        fi
+    
+    - name: Publish @tomquist/hmjs-protocol
+      if: env.PROTOCOL_EXISTS == 'false'
+      working-directory: ./packages/protocol
+      run: npm publish --provenance
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Publish @tomquist/hmjs-ble
+      if: env.BLE_EXISTS == 'false'
+      working-directory: ./packages/ble
+      run: npm publish --provenance
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ env.NEW_VERSION }}
+        release_name: Release v${{ env.NEW_VERSION }}
+        body: |
+          ## Changes in v${{ env.NEW_VERSION }}
+          
+          ### Published Packages
+          - `@tomquist/hmjs-protocol@${{ env.NEW_VERSION }}`
+          - `@tomquist/hmjs-ble@${{ env.NEW_VERSION }}`
+          
+          ### Installation
+          ```bash
+          echo "@tomquist:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          npm install @tomquist/hmjs-ble@${{ env.NEW_VERSION }}
+          ```
+          
+          See [CHANGELOG.md](./CHANGELOG.md) for detailed changes.
+        draft: false
+        prerelease: ${{ contains(env.NEW_VERSION, '-') }}
+    
+    - name: Update package-lock.json
+      run: |
+        npm install --package-lock-only
+        git add package-lock.json
+        git commit -m "chore: update package-lock.json for v$NEW_VERSION" || true
+        git push origin main || true

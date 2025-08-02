@@ -1,0 +1,32 @@
+{
+  "name": "demo",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "demo/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "demo/dist",
+        "main": "demo/src/index.tsx",
+        "tsConfig": "demo/tsconfig.json",
+        "assets": ["demo/src/index.html", "demo/src/styles.css"]
+      },
+      "dependsOn": [
+        {
+          "projects": ["ble"],
+          "target": "build"
+        }
+      ]
+    },
+    "serve": {
+      "executor": "@nx/webpack:webpack",
+      "options": {
+        "port": 4200,
+        "buildTarget": "demo:build"
+      }
+    }
+  },
+  "tags": []
+}

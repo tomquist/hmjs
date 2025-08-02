@@ -1,0 +1,68 @@
+name: Publish to GitHub Packages
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        registry-url: 'https://npm.pkg.github.com'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run tests
+      run: npm test
+    
+    - name: Build packages
+      run: npm run build
+    
+    - name: Extract version from tag
+      run: |
+        TAG_VERSION=${GITHUB_REF#refs/tags/v}
+        echo "RELEASE_VERSION=$TAG_VERSION" >> $GITHUB_ENV
+    
+    - name: Verify package versions
+      run: |
+        PROTOCOL_VERSION=$(node -p "require('./packages/protocol/package.json').version")
+        BLE_VERSION=$(node -p "require('./packages/ble/package.json').version")
+        
+        echo "Tag version: $RELEASE_VERSION"
+        echo "Protocol version: $PROTOCOL_VERSION"
+        echo "BLE version: $BLE_VERSION"
+        
+        if [ "$PROTOCOL_VERSION" != "$RELEASE_VERSION" ] || [ "$BLE_VERSION" != "$RELEASE_VERSION" ]; then
+          echo "❌ Package versions don't match tag version"
+          exit 1
+        fi
+        
+        echo "✅ All versions match"
+    
+    - name: Publish @tomquist/hmjs-protocol
+      working-directory: ./packages/protocol
+      run: npm publish --provenance
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Publish @tomquist/hmjs-ble
+      working-directory: ./packages/ble
+      run: npm publish --provenance
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

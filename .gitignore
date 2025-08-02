@@ -1,0 +1,9 @@
+node_modules/
+
+
+.nx/cache
+.nx/workspace-data
+coverage/
+dist/
+.DS_Store
+*.tsbuildinfo

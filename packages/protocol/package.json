@@ -1,0 +1,31 @@
+{
+  "name": "@tomquist/hmjs-protocol",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Core protocol implementation for HM device communication",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest"
+  },
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomquist/hmjs.git",
+    "directory": "packages/protocol"
+  },
+  "keywords": ["bluetooth", "ble", "battery", "hame", "typescript", "protocol"],
+  "license": "MIT",
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  }
+}

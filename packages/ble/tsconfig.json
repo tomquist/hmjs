@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "composite": true,
+    "lib": ["dom"]
+  },
+  "include": ["src/**/*"],
+  "references": [{ "path": "../protocol" }],
+  "exclude": ["node_modules", "dist"]
+}

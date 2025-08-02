@@ -1,0 +1,49 @@
+{
+  "name": "hmjs",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "devDependencies": {
+    "@eslint/js": "^9.32.0",
+    "@types/jest": "^29.5.14",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.38.0",
+    "eslint": "^9.32.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.3",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "fast-text-encoding": "^1.0.6",
+    "globals": "^16.3.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "prettier": "^3.6.2",
+    "ts-jest": "^29.3.2",
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "test": "npm run test --workspaces",
+    "build": "npm run build:protocol && npm run build:ble && npm run build:demo",
+    "build:packages": "npm run build:protocol && npm run build:ble",
+    "build:protocol": "cd packages/protocol && tsc",
+    "build:ble": "cd packages/ble && tsc",
+    "build:demo": "cd demo && tsc && npm run build:webpack",
+    "start": "cd demo && npm run start",
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "release": "node scripts/release.js",
+    "release:patch": "npm run release patch",
+    "release:minor": "npm run release minor",
+    "release:major": "npm run release major",
+    "release:beta": "npm run release prerelease beta",
+    "version:check": "node -e \"console.log('Protocol:', require('./packages/protocol/package.json').version); console.log('BLE:', require('./packages/ble/package.json').version);\""
+  },
+  "workspaces": [
+    "packages/*",
+    "demo"
+  ],
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}

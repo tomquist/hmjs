@@ -623,6 +623,285 @@ button#clear-logs-button:hover {
   font-size: 12px;
 }
 
+/* Protocol information sections */
+.protocol-section {
+  margin-bottom: 20px;
+}
+
+.protocol-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.protocol-section-header h4 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 16px;
+}
+
+.collapse-button {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.collapse-button:hover {
+  background-color: #2980b9;
+}
+
+.collapse-button:focus {
+  outline: 2px solid #2980b9;
+  outline-offset: 2px;
+}
+
+.command-categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.command-category {
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.command-category h5 {
+  margin-bottom: 8px;
+  color: #495057;
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 1px solid #e9ecef;
+  padding-bottom: 4px;
+}
+
+.command-category ul {
+  margin-left: 15px;
+  margin-bottom: 0;
+}
+
+.command-category li {
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+.protocol-info {
+  background-color: #e8f4fd;
+  border: 1px solid #b6d7ff;
+  border-radius: 6px;
+  padding: 15px;
+  margin: 15px 0;
+}
+
+.protocol-info h5 {
+  margin-bottom: 10px;
+  color: #0056b3;
+  font-size: 14px;
+}
+
+.protocol-format {
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 8px;
+  margin: 8px 0;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 12px;
+  text-align: center;
+}
+
+.protocol-info ul {
+  margin-left: 20px;
+  margin-top: 10px;
+}
+
+.protocol-info li {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.device-enums {
+  background-color: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 6px;
+  padding: 15px;
+  margin-top: 15px;
+}
+
+.device-enums h5 {
+  margin-bottom: 12px;
+  color: #856404;
+  font-size: 14px;
+}
+
+.enum-group {
+  margin-bottom: 12px;
+}
+
+.enum-group:last-child {
+  margin-bottom: 0;
+}
+
+.enum-group h6 {
+  margin-bottom: 6px;
+  color: #6c757d;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.enum-group ul {
+  margin-left: 15px;
+  margin-bottom: 0;
+}
+
+.enum-group li {
+  margin-bottom: 2px;
+  font-size: 12px;
+}
+
+/* Payload example styles */
+.payload-example {
+  margin: 8px 0;
+}
+
+.payload-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.command-info {
+  font-size: 13px;
+  color: #2c3e50;
+}
+
+.payload-toggle-button {
+  background-color: #17a2b8;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.payload-toggle-button:hover {
+  background-color: #138496;
+}
+
+.payload-toggle-button:focus {
+  outline: 2px solid #138496;
+  outline-offset: 1px;
+}
+
+.payload-content {
+  background-color: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.payload-details p {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #495057;
+}
+
+.payload-format {
+  background-color: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 3px;
+  padding: 6px 8px;
+  margin: 8px 0;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 12px;
+  text-align: center;
+  color: #6f42c1;
+}
+
+.payload-details ul {
+  margin: 8px 0 8px 20px;
+}
+
+.payload-details li {
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.payload-example-cmd {
+  background-color: #e8f5e8;
+  border: 1px solid #c3e6c3;
+  border-radius: 3px;
+  padding: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.payload-example-cmd code {
+  background-color: transparent;
+  color: #155724;
+  font-weight: 600;
+}
+
+/* Timer structure specific styles */
+.timer-structure {
+  background-color: #fff8e1;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  padding: 10px;
+  margin: 8px 0;
+}
+
+.timer-response-info {
+  background-color: #f3e5f5;
+  border: 1px solid #9c27b0;
+  border-radius: 4px;
+  padding: 10px;
+  margin: 8px 0;
+}
+
+.timer-structure h6,
+.timer-response-info h6 {
+  margin: 0 0 8px 0;
+  color: #333;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.timer-structure ul,
+.timer-response-info ul {
+  margin: 4px 0 4px 20px;
+}
+
+.timer-structure li,
+.timer-response-info li {
+  margin-bottom: 3px;
+  font-size: 12px;
+}
+
+.timer-response-info p {
+  margin: 8px 0 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a1b9a;
+}
+
 .command-section {
   background-color: #f8f9fa;
   border-radius: 8px;

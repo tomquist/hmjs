@@ -5,3 +5,6 @@ export { default as CellInfoTab } from "./CellInfoTab.js";
 export { default as ConfigurationTab } from "./ConfigurationTab.js";
 export { default as LogsTab } from "./LogsTab.js";
 export { default as AdvancedTab } from "./AdvancedTab.js";
+export { default as ProtocolInfo } from "./ProtocolInfo.js";
+export { default as PayloadExample } from "./PayloadExample.js";
+export { default as CommandCategory } from "./CommandCategory.js";

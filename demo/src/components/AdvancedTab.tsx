@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import ProtocolInfo from "./ProtocolInfo";
 
 interface AdvancedTabProps {
   isConnected: boolean;
@@ -351,28 +352,7 @@ const AdvancedTab: React.FC<AdvancedTabProps> = ({
             <div className="error-message">Error: {buildError}</div>
           )}
 
-          <div className="builder-examples">
-            <h4>Common Command Types:</h4>
-            <ul>
-              <li>
-                <code>3</code> or <code>0x03</code> - Runtime Info
-              </li>
-              <li>
-                <code>4</code> or <code>0x04</code> - Device Info
-              </li>
-              <li>
-                <code>15</code> or <code>0x0F</code> - Cell Info
-              </li>
-              <li>
-                <code>5</code> or <code>0x05</code> - Set WiFi (requires
-                payload)
-              </li>
-              <li>
-                <code>32</code> or <code>0x20</code> - Set MQTT (requires
-                payload)
-              </li>
-            </ul>
-          </div>
+          <ProtocolInfo className="builder-examples" />
         </div>
 
         <div className="command-section">

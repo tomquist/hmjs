@@ -154,7 +154,7 @@ const RuntimeTab: React.FC<RuntimeTabProps> = ({
                     <td>
                       <strong>Battery Charge Today</strong>
                     </td>
-                    <td>{runtimeInfo.dailyTotalBatteryCharge / 10}Wh</td>
+                    <td>{runtimeInfo.dailyTotalBatteryCharge}Wh</td>
                   </tr>
                 )}
                 {runtimeInfo.dailyTotalBatteryDischarge !== undefined && (
@@ -162,7 +162,7 @@ const RuntimeTab: React.FC<RuntimeTabProps> = ({
                     <td>
                       <strong>Battery Discharge Today</strong>
                     </td>
-                    <td>{runtimeInfo.dailyTotalBatteryDischarge / 10}Wh</td>
+                    <td>{runtimeInfo.dailyTotalBatteryDischarge}Wh</td>
                   </tr>
                 )}
                 {runtimeInfo.dailyTotalLoadCharge !== undefined && (
@@ -170,7 +170,7 @@ const RuntimeTab: React.FC<RuntimeTabProps> = ({
                     <td>
                       <strong>Load Charge Today</strong>
                     </td>
-                    <td>{runtimeInfo.dailyTotalLoadCharge / 10}Wh</td>
+                    <td>{runtimeInfo.dailyTotalLoadCharge}Wh</td>
                   </tr>
                 )}
                 {runtimeInfo.dailyTotalLoadDischarge !== undefined && (
@@ -178,7 +178,7 @@ const RuntimeTab: React.FC<RuntimeTabProps> = ({
                     <td>
                       <strong>Load Discharge Today</strong>
                     </td>
-                    <td>{runtimeInfo.dailyTotalLoadDischarge / 10}Wh</td>
+                    <td>{runtimeInfo.dailyTotalLoadDischarge}Wh</td>
                   </tr>
                 )}
 

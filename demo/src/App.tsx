@@ -8,6 +8,7 @@ import {
   HMDeviceProtocol,
 } from "@tomquist/hmjs-protocol";
 import {
+  DisclaimerModal,
   ConnectionPanel,
   DeviceInfoTab,
   RuntimeTab,
@@ -33,6 +34,9 @@ interface FoundDevice {
 }
 
 const App: React.FC = () => {
+  // Disclaimer state
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+
   // State variables
   const [activeTab, setActiveTab] = useState<TabType>(TabType.DeviceInfo);
   const [isConnected, setIsConnected] = useState(false);
@@ -787,6 +791,10 @@ const App: React.FC = () => {
     setLogs([]);
     addLog("Logs cleared");
   };
+
+  if (!disclaimerAccepted) {
+    return <DisclaimerModal onAccept={() => setDisclaimerAccepted(true)} />;
+  }
 
   return (
     <div className="container">

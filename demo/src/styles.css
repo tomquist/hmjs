@@ -1160,3 +1160,115 @@ button#clear-logs-button:hover {
     flex: 1;
   }
 }
+
+/* Disclaimer Modal */
+.disclaimer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.disclaimer-modal {
+  background-color: #fff;
+  border-radius: 8px;
+  max-width: 600px;
+  width: 100%;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  border-top: 4px solid #e74c3c;
+}
+
+.disclaimer-header {
+  background-color: #e74c3c;
+  color: #fff;
+  padding: 16px 24px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.disclaimer-icon {
+  font-size: 1.5rem;
+}
+
+.disclaimer-body {
+  padding: 24px;
+  line-height: 1.7;
+  color: #333;
+}
+
+.disclaimer-body p {
+  margin-bottom: 16px;
+}
+
+.disclaimer-body ul {
+  margin: 0 0 16px 20px;
+  list-style-type: disc;
+}
+
+.disclaimer-body ul li {
+  margin-bottom: 8px;
+}
+
+.disclaimer-warning {
+  color: #e74c3c;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+
+.disclaimer-footer {
+  padding: 16px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.disclaimer-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.disclaimer-checkbox input[type="checkbox"] {
+  margin-top: 4px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: #e74c3c;
+}
+
+.disclaimer-button {
+  padding: 12px 24px;
+  background-color: #e74c3c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  align-self: flex-end;
+}
+
+.disclaimer-button:hover:not(:disabled) {
+  background-color: #c0392b;
+}
+
+.disclaimer-button:disabled {
+  background-color: #bdc3c7;
+  cursor: not-allowed;
+}

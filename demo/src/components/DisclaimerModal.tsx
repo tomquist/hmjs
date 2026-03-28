@@ -23,23 +23,19 @@ const DisclaimerModal: React.FC<DisclaimerModalProps> = ({ onAccept }) => {
           <ul>
             <li>
               This software is{" "}
-              <strong>
-                not affiliated with, endorsed by, or supported by
-              </strong>{" "}
+              <strong>not affiliated with, endorsed by, or supported by</strong>{" "}
               the device manufacturer.
             </li>
             <li>
               Sending commands to your device may result in{" "}
-              <strong>
-                unexpected behavior, misconfiguration, or damage
-              </strong>{" "}
+              <strong>unexpected behavior, misconfiguration, or damage</strong>{" "}
               to your device.
             </li>
             <li>
               This tool is provided{" "}
-              <strong>&quot;as is&quot; without any warranty</strong>, express or
-              implied. The authors assume <strong>no liability</strong> for any
-              damage, data loss, or malfunction caused by its use.
+              <strong>&quot;as is&quot; without any warranty</strong>, express
+              or implied. The authors assume <strong>no liability</strong> for
+              any damage, data loss, or malfunction caused by its use.
             </li>
             <li>
               You are solely responsible for any actions performed through this

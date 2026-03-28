@@ -793,9 +793,7 @@ const App: React.FC = () => {
   };
 
   if (!disclaimerAccepted) {
-    return (
-      <DisclaimerModal onAccept={() => setDisclaimerAccepted(true)} />
-    );
+    return <DisclaimerModal onAccept={() => setDisclaimerAccepted(true)} />;
   }
 
   return (

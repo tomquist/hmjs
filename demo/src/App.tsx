@@ -309,11 +309,13 @@ const App: React.FC = () => {
             acceptAllDevices: allowAnyDevice,
           });
 
-          // Only proceed if we have a valid device
-          if (device.id && device.name) {
+          // Only proceed if we have a valid device. Whitelabeled devices may
+          // advertise no name, so allow unnamed devices when accept-all is on.
+          if (device.id && (device.name || allowAnyDevice)) {
+            const deviceName = device.name || "Unnamed Device";
             const newDevice = {
               device,
-              name: device.name,
+              name: deviceName,
               id: device.id,
             };
 
@@ -322,7 +324,7 @@ const App: React.FC = () => {
 
             // Connect to the device immediately
             setInfoStatus("Connecting...");
-            setConnectionStatus(`Connecting to ${newDevice.name}...`);
+            setConnectionStatus(`Connecting to ${deviceName}...`);
 
             await deviceManagerRef.current.connect(device);
           } else {

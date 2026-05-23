@@ -7,6 +7,12 @@ interface BLEManagerOptions {
   reconnectDelay?: number;
   deviceNamePrefix?: string;
   logger?: (message: string, ...args: unknown[]) => void;
+  /**
+   * Web Bluetooth implementation to use. Defaults to `navigator.bluetooth`
+   * in browsers. In Node.js, the optional `webbluetooth` peer dependency is
+   * loaded automatically when installed; pass an instance here to override.
+   */
+  bluetooth?: Bluetooth;
 }
 
 export type {

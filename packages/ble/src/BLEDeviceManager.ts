@@ -47,7 +47,12 @@ class BLEDeviceManager {
   private connecting: boolean = false;
 
   // Options with defaults
-  private options: Required<BLEManagerOptions>;
+  private options: Required<Omit<BLEManagerOptions, "bluetooth">> & {
+    bluetooth?: Bluetooth;
+  };
+
+  // Cached Web Bluetooth implementation auto-loaded in Node.js
+  private resolvedBluetooth: Bluetooth | null = null;
 
   // Protocol handler
   private protocol: HMDeviceProtocol;
@@ -87,6 +92,7 @@ class BLEDeviceManager {
       reconnectDelay: options.reconnectDelay || 2000,
       deviceNamePrefix: options.deviceNamePrefix || "HM_",
       logger: options.logger || console.log,
+      bluetooth: options.bluetooth,
     };
     this.explicitDisconnect = true;
 
@@ -163,6 +169,55 @@ class BLEDeviceManager {
   }
 
   /**
+   * Resolve a Web Bluetooth implementation. Prefers an explicit override,
+   * then `options.bluetooth`, then `navigator.bluetooth`, then auto-loads
+   * the optional `webbluetooth` peer dependency in Node.js.
+   */
+  private async resolveBluetooth(override?: Bluetooth): Promise<Bluetooth> {
+    if (override) return override;
+    if (this.options.bluetooth) return this.options.bluetooth;
+    if (typeof navigator !== "undefined" && navigator.bluetooth) {
+      return navigator.bluetooth;
+    }
+    if (this.resolvedBluetooth) return this.resolvedBluetooth;
+    const isNode =
+      typeof process !== "undefined" && process.versions?.node != null;
+    if (isNode) {
+      try {
+        const moduleName = "webbluetooth";
+        const mod = (await import(
+          /* webpackIgnore: true */ /* @vite-ignore */ moduleName
+        )) as { Bluetooth: new () => Bluetooth };
+        this.resolvedBluetooth = new mod.Bluetooth();
+        return this.resolvedBluetooth;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code =
+          err instanceof Error && "code" in err
+            ? (err as { code?: string }).code
+            : undefined;
+        const isModuleNotFound =
+          code === "ERR_MODULE_NOT_FOUND" ||
+          code === "MODULE_NOT_FOUND" ||
+          /Cannot find (module|package)/i.test(message);
+        if (isModuleNotFound) {
+          throw new Error(
+            "The `webbluetooth` package is not installed. Run `npm install webbluetooth`, or pass a `Bluetooth` instance via the `bluetooth` option.",
+            { cause: err },
+          );
+        }
+        throw new Error(
+          `Failed to initialize the \`webbluetooth\` Bluetooth implementation: ${message}`,
+          { cause: err },
+        );
+      }
+    }
+    throw new Error(
+      "Web Bluetooth API is not supported in this browser. Pass a `Bluetooth` instance via the `bluetooth` option.",
+    );
+  }
+
+  /**
    * Scan for available devices with the specified device name prefix
    * @param options Optional scan options to override defaults
    * @returns The selected device
@@ -170,22 +225,20 @@ class BLEDeviceManager {
   public async scanForDevices(
     options: Partial<BLEManagerOptions> = {},
   ): Promise<BluetoothDevice> {
-    if (!navigator.bluetooth) {
-      throw new Error("Web Bluetooth API is not supported in this browser");
-    }
-
     // Merge scan options with defaults
     const scanOptions = {
       ...this.options,
       ...options,
     };
 
+    const bluetooth = await this.resolveBluetooth(scanOptions.bluetooth);
+
     this.log("Requesting Bluetooth device...");
     this.log(`Using device name prefix: "${scanOptions.deviceNamePrefix}"`);
 
     try {
       // Request device with appropriate filters
-      const device = await navigator.bluetooth.requestDevice({
+      const device = await bluetooth.requestDevice({
         filters: [{ namePrefix: scanOptions.deviceNamePrefix }],
         optionalServices: [BLEDeviceManager.SERVICE_UUID],
       });

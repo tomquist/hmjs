@@ -1,6 +1,6 @@
 # @tomquist/hmjs-ble
 
-BLE transport layer for HM devices using Web Bluetooth API.
+BLE transport layer for HM devices using the Web Bluetooth API. Works in browsers and in Node.js (via the optional [`webbluetooth`](https://github.com/thegecko/webbluetooth) peer dependency).
 
 ## Installation
 
@@ -59,6 +59,39 @@ console.log('Cell voltages:', cellInfo.cellVoltages);
 - **Device Configuration**: Read and write device settings
 - **Cell Monitoring**: Individual cell voltage and temperature monitoring
 - **Event-driven API**: Subscribe to device events and data updates
+
+## Node.js Usage
+
+The library auto-detects Node.js and loads the optional [`webbluetooth`](https://github.com/thegecko/webbluetooth) peer dependency (backed by BlueZ on Linux — e.g. Raspberry Pi):
+
+```bash
+npm install webbluetooth
+```
+
+Then use the manager exactly as in the browser — no extra wiring required:
+
+```typescript
+import { BLEDeviceManager } from '@tomquist/hmjs-ble';
+
+const manager = new BLEDeviceManager();
+await manager.connect();
+console.log(await manager.getDeviceInfo());
+```
+
+If you need to customise the `Bluetooth` instance (e.g. to filter devices during the Node.js scan), inject your own:
+
+```typescript
+import { Bluetooth } from 'webbluetooth';
+import { BLEDeviceManager } from '@tomquist/hmjs-ble';
+
+const bluetooth = new Bluetooth({
+  deviceFound: (device) => device.name?.startsWith('HM_') ?? false,
+});
+const manager = new BLEDeviceManager({ bluetooth });
+await manager.connect();
+```
+
+BlueZ typically needs root or `CAP_NET_ADMIN`/`CAP_NET_RAW` capabilities, so run with `sudo` or grant the Node binary capabilities.
 
 ## Browser Compatibility
 

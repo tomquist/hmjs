@@ -53,6 +53,7 @@ const App: React.FC = () => {
   const [selectedDevice, setSelectedDevice] = useState<FoundDevice | null>(
     null,
   );
+  const [allowAnyDevice, setAllowAnyDevice] = useState(false);
 
   // Track previous active tab for refresh logic
   const prevActiveTabRef = useRef<TabType>(activeTab);
@@ -304,13 +305,17 @@ const App: React.FC = () => {
       try {
         if (deviceManagerRef.current) {
           // Use the BLE package's scanForDevices method
-          const device = await deviceManagerRef.current.scanForDevices();
+          const device = await deviceManagerRef.current.scanForDevices({
+            acceptAllDevices: allowAnyDevice,
+          });
 
-          // Only proceed if we have a valid device
-          if (device.id && device.name) {
+          // Only proceed if we have a valid device. Whitelabeled devices may
+          // advertise no name, so allow unnamed devices when accept-all is on.
+          if (device.id && (device.name || allowAnyDevice)) {
+            const deviceName = device.name || "Unnamed Device";
             const newDevice = {
               device,
-              name: device.name,
+              name: deviceName,
               id: device.id,
             };
 
@@ -319,7 +324,7 @@ const App: React.FC = () => {
 
             // Connect to the device immediately
             setInfoStatus("Connecting...");
-            setConnectionStatus(`Connecting to ${newDevice.name}...`);
+            setConnectionStatus(`Connecting to ${deviceName}...`);
 
             await deviceManagerRef.current.connect(device);
           } else {
@@ -818,9 +823,11 @@ const App: React.FC = () => {
         connectionStatus={connectionStatus}
         autoReconnect={autoReconnect}
         selectedDevice={selectedDevice}
+        allowAnyDevice={allowAnyDevice}
         onScan={scanForDevices}
         onDisconnect={disconnectFromDevice}
         onAutoReconnectChange={setAutoReconnect}
+        onAllowAnyDeviceChange={setAllowAnyDevice}
       />
 
       <div className="tabs">

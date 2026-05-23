@@ -6,6 +6,7 @@ interface BLEManagerOptions {
   autoReconnect?: boolean;
   reconnectDelay?: number;
   deviceNamePrefix?: string;
+  acceptAllDevices?: boolean;
   logger?: (message: string, ...args: unknown[]) => void;
   /**
    * Web Bluetooth implementation to use. Defaults to `navigator.bluetooth`

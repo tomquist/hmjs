@@ -91,6 +91,7 @@ class BLEDeviceManager {
         options.autoReconnect !== undefined ? options.autoReconnect : true,
       reconnectDelay: options.reconnectDelay || 2000,
       deviceNamePrefix: options.deviceNamePrefix || "HM_",
+      acceptAllDevices: options.acceptAllDevices ?? false,
       logger: options.logger || console.log,
       bluetooth: options.bluetooth,
     };
@@ -234,14 +235,25 @@ class BLEDeviceManager {
     const bluetooth = await this.resolveBluetooth(scanOptions.bluetooth);
 
     this.log("Requesting Bluetooth device...");
-    this.log(`Using device name prefix: "${scanOptions.deviceNamePrefix}"`);
+    if (scanOptions.acceptAllDevices) {
+      this.log("Accepting all Bluetooth devices");
+    } else {
+      this.log(`Using device name prefix: "${scanOptions.deviceNamePrefix}"`);
+    }
 
     try {
-      // Request device with appropriate filters
-      const device = await bluetooth.requestDevice({
-        filters: [{ namePrefix: scanOptions.deviceNamePrefix }],
-        optionalServices: [BLEDeviceManager.SERVICE_UUID],
-      });
+      // Request device with appropriate filters. The Web Bluetooth API allows
+      // either `filters` or `acceptAllDevices`, but not both at once.
+      const requestOptions = scanOptions.acceptAllDevices
+        ? {
+            acceptAllDevices: true,
+            optionalServices: [BLEDeviceManager.SERVICE_UUID],
+          }
+        : {
+            filters: [{ namePrefix: scanOptions.deviceNamePrefix }],
+            optionalServices: [BLEDeviceManager.SERVICE_UUID],
+          };
+      const device = await bluetooth.requestDevice(requestOptions);
 
       this.log(
         `Selected device: ${device.name || "unnamed device"} (${device.id})`,

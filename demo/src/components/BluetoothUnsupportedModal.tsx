@@ -15,11 +15,46 @@ const BluetoothUnsupportedModal: React.FC<BluetoothUnsupportedModalProps> = ({
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(pageUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        typeof navigator.clipboard.writeText === "function"
+      ) {
+        await navigator.clipboard.writeText(pageUrl);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        return;
+      }
+
+      // Fallback for environments without the async Clipboard API
+      // (e.g. older iOS Safari, non-secure contexts).
+      if (typeof document === "undefined") {
+        return;
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = pageUrl;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.top = "0";
+      textarea.style.left = "0";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, pageUrl.length);
+      let ok = false;
+      try {
+        ok = document.execCommand("copy");
+      } catch {
+        ok = false;
+      }
+      document.body.removeChild(textarea);
+      if (ok) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
     } catch {
-      setCopied(false);
+      // Swallow — leave `copied` as-is so the button label doesn't lie.
     }
   };
 

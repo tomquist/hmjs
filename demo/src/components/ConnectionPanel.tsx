@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 interface FoundDevice {
   device: BluetoothDevice;
@@ -12,9 +12,11 @@ interface ConnectionPanelProps {
   connectionStatus: string;
   autoReconnect: boolean;
   selectedDevice: FoundDevice | null;
+  allowAnyDevice: boolean;
   onScan: () => void;
   onDisconnect: () => void;
   onAutoReconnectChange: (checked: boolean) => void;
+  onAllowAnyDeviceChange: (checked: boolean) => void;
 }
 
 const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
@@ -23,10 +25,14 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   connectionStatus,
   autoReconnect,
   selectedDevice,
+  allowAnyDevice,
   onScan,
   onDisconnect,
   onAutoReconnectChange,
+  onAllowAnyDeviceChange,
 }) => {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
   return (
     <div className="connection-panel">
       <h2>Device Connection</h2>
@@ -59,6 +65,28 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
           />
           Auto-reconnect on disconnect
         </label>
+      </div>
+      <div className="advanced-options">
+        <button
+          type="button"
+          className="advanced-options-toggle"
+          aria-expanded={showAdvanced}
+          onClick={() => setShowAdvanced((value) => !value)}
+        >
+          {showAdvanced ? "▾" : "▸"} Advanced options
+        </button>
+        {showAdvanced && (
+          <div className="advanced-options-content">
+            <label>
+              <input
+                type="checkbox"
+                checked={allowAnyDevice}
+                onChange={(e) => onAllowAnyDeviceChange(e.target.checked)}
+              />
+              Connect to any Bluetooth device
+            </label>
+          </div>
+        )}
       </div>
     </div>
   );

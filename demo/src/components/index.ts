@@ -1,4 +1,5 @@
 export { default as DisclaimerModal } from "./DisclaimerModal.js";
+export { default as BluetoothUnsupportedModal } from "./BluetoothUnsupportedModal.js";
 export { default as ConnectionPanel } from "./ConnectionPanel.js";
 export { default as DeviceInfoTab } from "./DeviceInfoTab.js";
 export { default as RuntimeTab } from "./RuntimeTab.js";

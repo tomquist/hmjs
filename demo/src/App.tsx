@@ -9,6 +9,7 @@ import {
 } from "@tomquist/hmjs-protocol";
 import {
   DisclaimerModal,
+  BluetoothUnsupportedModal,
   ConnectionPanel,
   DeviceInfoTab,
   RuntimeTab,
@@ -16,6 +17,7 @@ import {
   ConfigurationTab,
   AdvancedTab,
 } from "./components";
+import { isIOS, isBluetoothSupported } from "./utils/platform.js";
 
 // Tabs enum
 enum TabType {
@@ -36,6 +38,11 @@ interface FoundDevice {
 const App: React.FC = () => {
   // Disclaimer state
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+
+  // Web Bluetooth unsupported state
+  const [bluetoothUnsupported, setBluetoothUnsupported] = useState(
+    () => !isBluetoothSupported(),
+  );
 
   // State variables
   const [activeTab, setActiveTab] = useState<TabType>(TabType.DeviceInfo);
@@ -239,11 +246,9 @@ const App: React.FC = () => {
     });
 
     // Check if Web Bluetooth API is supported
-    if (!navigator.bluetooth) {
+    if (!isBluetoothSupported()) {
       logFunction("Web Bluetooth API is not supported in this browser");
-      alert(
-        "Web Bluetooth is not supported in this browser. Please use Chrome, Edge, or Opera.",
-      );
+      setBluetoothUnsupported(true);
       setConnectionStatus("Bluetooth not supported in this browser");
     }
 
@@ -791,6 +796,10 @@ const App: React.FC = () => {
     setLogs([]);
     addLog("Logs cleared");
   };
+
+  if (bluetoothUnsupported) {
+    return <BluetoothUnsupportedModal isIOS={isIOS()} />;
+  }
 
   if (!disclaimerAccepted) {
     return <DisclaimerModal onAccept={() => setDisclaimerAccepted(true)} />;

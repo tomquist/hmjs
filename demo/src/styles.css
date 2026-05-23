@@ -1280,3 +1280,57 @@ button#clear-logs-button:hover {
   background-color: #bdc3c7;
   cursor: not-allowed;
 }
+
+.bluetooth-unsupported-modal {
+  border-top-color: #3498db;
+}
+
+.bluetooth-unsupported-modal .disclaimer-header {
+  background-color: #3498db;
+}
+
+.bluefy-link {
+  display: inline-block;
+  padding: 10px 16px;
+  background-color: #3498db;
+  color: #fff;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.bluefy-link:hover {
+  background-color: #2980b9;
+}
+
+.bluetooth-url-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bluetooth-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  background-color: #f5f7fa;
+  border: 1px solid #dfe4ea;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  overflow-x: auto;
+  white-space: nowrap;
+  word-break: break-all;
+}
+
+.bluetooth-copy-button {
+  background-color: #3498db;
+  align-self: stretch;
+  padding: 10px 16px;
+  white-space: nowrap;
+}
+
+.bluetooth-copy-button:hover:not(:disabled) {
+  background-color: #2980b9;
+}

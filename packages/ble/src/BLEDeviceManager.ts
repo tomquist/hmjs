@@ -190,9 +190,25 @@ class BLEDeviceManager {
         )) as { Bluetooth: new () => Bluetooth };
         this.resolvedBluetooth = new mod.Bluetooth();
         return this.resolvedBluetooth;
-      } catch {
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code =
+          err instanceof Error && "code" in err
+            ? (err as { code?: string }).code
+            : undefined;
+        const isModuleNotFound =
+          code === "ERR_MODULE_NOT_FOUND" ||
+          code === "MODULE_NOT_FOUND" ||
+          /Cannot find (module|package)/i.test(message);
+        if (isModuleNotFound) {
+          throw new Error(
+            "The `webbluetooth` package is not installed. Run `npm install webbluetooth`, or pass a `Bluetooth` instance via the `bluetooth` option.",
+            { cause: err },
+          );
+        }
         throw new Error(
-          "No Web Bluetooth implementation available. Install the `webbluetooth` package (`npm install webbluetooth`) or pass a `Bluetooth` instance via the `bluetooth` option.",
+          `Failed to initialize the \`webbluetooth\` Bluetooth implementation: ${message}`,
+          { cause: err },
         );
       }
     }

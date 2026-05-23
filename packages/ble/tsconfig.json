@@ -5,7 +5,7 @@
     "rootDir": "./src",
     "declaration": true,
     "composite": true,
-    "lib": ["dom"]
+    "lib": ["es2022", "dom"]
   },
   "include": ["src/**/*"],
   "references": [{ "path": "../protocol" }],

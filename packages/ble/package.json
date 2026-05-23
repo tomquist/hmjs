@@ -2,7 +2,7 @@
   "name": "@tomquist/hmjs-ble",
   "version": "0.1.0",
   "type": "module",
-  "description": "BLE transport layer for HM devices using Web Bluetooth API",
+  "description": "BLE transport layer for HM devices using the Web Bluetooth API (browser and Node.js)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -11,6 +11,14 @@
   },
   "dependencies": {
     "@tomquist/hmjs-protocol": "^0.1.0"
+  },
+  "peerDependencies": {
+    "webbluetooth": "*"
+  },
+  "peerDependenciesMeta": {
+    "webbluetooth": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/web-bluetooth": "^0.0.21",
@@ -22,7 +30,7 @@
     "url": "git+https://github.com/tomquist/hmjs.git",
     "directory": "packages/ble"
   },
-  "keywords": ["bluetooth", "ble", "battery", "hame", "typescript", "web-bluetooth"],
+  "keywords": ["bluetooth", "ble", "battery", "hame", "typescript", "web-bluetooth", "node"],
   "license": "MIT",
   "files": [
     "dist/**/*",

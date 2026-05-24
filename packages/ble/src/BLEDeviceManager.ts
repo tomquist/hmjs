@@ -500,6 +500,34 @@ class BLEDeviceManager {
    * @param options Command options
    * @returns Command response or void
    */
+  /**
+   * Write a value to the command characteristic.
+   *
+   * Prefers `writeValueWithoutResponse`, but not every Web Bluetooth
+   * implementation provides it (e.g. Bluefy on iOS, some `webbluetooth`
+   * builds in Node.js). Fall back to the broadly supported `writeValue`
+   * so commands still go through on those platforms.
+   */
+  private async writeCommandValue(value: BufferSource): Promise<void> {
+    const characteristic = this.commandCharacteristic as
+      | (BluetoothRemoteGATTCharacteristic & {
+          writeValue?: (value: BufferSource) => Promise<void>;
+        })
+      | null;
+    if (!characteristic) {
+      throw new Error("Not connected to device");
+    }
+    if (typeof characteristic.writeValueWithoutResponse === "function") {
+      await characteristic.writeValueWithoutResponse(value);
+    } else if (typeof characteristic.writeValue === "function") {
+      await characteristic.writeValue(value);
+    } else {
+      throw new Error(
+        "The connected Web Bluetooth implementation does not support writing to the command characteristic.",
+      );
+    }
+  }
+
   private async sendCommand(
     commandType: number,
     payload: Uint8Array | number[] | null = null,
@@ -518,11 +546,11 @@ class BLEDeviceManager {
     try {
       // Create the command message using the protocol
       const command = this.protocol.createCommandMessage(commandType, payload);
-      await this.commandCharacteristic.writeValueWithoutResponse(command);
+      await this.writeCommandValue(command);
 
       // Send twice for reliability if enabled
       if (cmdOptions.sendTwice) {
-        await this.commandCharacteristic.writeValueWithoutResponse(command);
+        await this.writeCommandValue(command);
       }
 
       this.log(`Command sent: 0x${commandType.toString(16)}`);
@@ -698,7 +726,7 @@ class BLEDeviceManager {
       );
 
       // Send the raw command
-      await this.commandCharacteristic.writeValueWithoutResponse(bytes);
+      await this.writeCommandValue(bytes);
 
       this.log(`Raw command sent successfully`);
     } catch (error) {

@@ -52,12 +52,12 @@ class BLEDeviceManager {
     bluetooth?: Bluetooth;
   };
 
-  private get deviceUUIDs(): {
+  private getDeviceUUIDs(deviceType: DeviceType = this.options.deviceType): {
     service: string;
     command: string;
     status: string;
   } {
-    if (this.options.deviceType === "tronic") {
+    if (deviceType === "tronic") {
       return {
         service: BLEDeviceManager.TRONIC_SERVICE_UUID,
         command: BLEDeviceManager.TRONIC_COMMAND_UUID,
@@ -277,7 +277,7 @@ class BLEDeviceManager {
     try {
       // Request device with appropriate filters. The Web Bluetooth API allows
       // either `filters` or `acceptAllDevices`, but not both at once.
-      const serviceUUID = this.deviceUUIDs.service;
+      const serviceUUID = this.getDeviceUUIDs(scanOptions.deviceType).service;
       const requestOptions = scanOptions.acceptAllDevices
         ? {
             acceptAllDevices: true,
@@ -350,9 +350,9 @@ class BLEDeviceManager {
       const server = await this.device.gatt!.connect();
 
       // Get primary service (UUID depends on device type)
-      const uuids = this.deviceUUIDs;
+      const uuids = this.getDeviceUUIDs(connectionOptions.deviceType);
       this.log(
-        `Getting primary service (${uuids.service}, deviceType=${this.options.deviceType})...`,
+        `Getting primary service (${uuids.service}, deviceType=${connectionOptions.deviceType ?? this.options.deviceType})...`,
       );
       const service = await server.getPrimaryService(uuids.service);
 
@@ -438,7 +438,7 @@ class BLEDeviceManager {
           const server = await lastDevice.gatt!.connect();
 
           // Get primary service (UUID depends on device type)
-          const uuids = this.deviceUUIDs;
+          const uuids = this.getDeviceUUIDs(this.options.deviceType);
           const service = await server.getPrimaryService(uuids.service);
 
           this.commandCharacteristic = await service.getCharacteristic(

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { BLEDeviceManager } from "@tomquist/hmjs-ble";
+import { BLEDeviceManager, DeviceType } from "@tomquist/hmjs-ble";
 import {
   DeviceInfo,
   RuntimeInfo,
@@ -54,6 +54,7 @@ const App: React.FC = () => {
     null,
   );
   const [allowAnyDevice, setAllowAnyDevice] = useState(false);
+  const [deviceType, setDeviceType] = useState<DeviceType>("b2500");
 
   // Track previous active tab for refresh logic
   const prevActiveTabRef = useRef<TabType>(activeTab);
@@ -266,6 +267,13 @@ const App: React.FC = () => {
       deviceManagerRef.current.setAutoReconnect(autoReconnect);
     }
   }, [autoReconnect]);
+
+  // Update device manager when deviceType changes
+  useEffect(() => {
+    if (deviceManagerRef.current) {
+      deviceManagerRef.current.setDeviceType(deviceType);
+    }
+  }, [deviceType]);
 
   // Refresh data when tab changes
   useEffect(() => {
@@ -824,10 +832,12 @@ const App: React.FC = () => {
         autoReconnect={autoReconnect}
         selectedDevice={selectedDevice}
         allowAnyDevice={allowAnyDevice}
+        deviceType={deviceType}
         onScan={scanForDevices}
         onDisconnect={disconnectFromDevice}
         onAutoReconnectChange={setAutoReconnect}
         onAllowAnyDeviceChange={setAllowAnyDevice}
+        onDeviceTypeChange={setDeviceType}
       />
 
       <div className="tabs">

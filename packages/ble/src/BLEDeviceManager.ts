@@ -12,6 +12,7 @@ import {
 } from "@tomquist/hmjs-protocol";
 import {
   BLEManagerOptions,
+  DeviceType,
   EventCallback,
   NotificationHandlerMap,
 } from "./types.js";
@@ -51,6 +52,22 @@ class BLEDeviceManager {
     bluetooth?: Bluetooth;
   };
 
+  private get characteristicUUIDs(): {
+    command: string;
+    status: string;
+  } {
+    if (this.options.deviceType === "tronic") {
+      return {
+        command: BLEDeviceManager.TRONIC_COMMAND_UUID,
+        status: BLEDeviceManager.TRONIC_STATUS_UUID,
+      };
+    }
+    return {
+      command: BLEDeviceManager.B2500_COMMAND_UUID,
+      status: BLEDeviceManager.B2500_STATUS_UUID,
+    };
+  }
+
   // Cached Web Bluetooth implementation auto-loaded in Node.js
   private resolvedBluetooth: Bluetooth | null = null;
 
@@ -59,10 +76,20 @@ class BLEDeviceManager {
 
   // Service and characteristic UUIDs
   static readonly SERVICE_UUID = "0000ff00-0000-1000-8000-00805f9b34fb";
+
+  // B2500 (200-series, default)
+  static readonly B2500_COMMAND_UUID = "0000ff01-0000-1000-8000-00805f9b34fb";
+  static readonly B2500_STATUS_UUID = "0000ff02-0000-1000-8000-00805f9b34fb";
+
+  // Tronic / 100-series (experimental)
+  static readonly TRONIC_COMMAND_UUID = "0000ff03-0000-1000-8000-00805f9b34fb";
+  static readonly TRONIC_STATUS_UUID = "0000ff01-0000-1000-8000-00805f9b34fb";
+
+  // Keep legacy aliases pointing at B2500 defaults for backwards compatibility
   static readonly COMMAND_CHARACTERISTIC_UUID =
-    "0000ff01-0000-1000-8000-00805f9b34fb";
+    BLEDeviceManager.B2500_COMMAND_UUID;
   static readonly STATUS_CHARACTERISTIC_UUID =
-    "0000ff02-0000-1000-8000-00805f9b34fb";
+    BLEDeviceManager.B2500_STATUS_UUID;
 
   // Event listeners
   private eventListeners: EventMap = {
@@ -94,6 +121,7 @@ class BLEDeviceManager {
       acceptAllDevices: options.acceptAllDevices ?? false,
       logger: options.logger || console.log,
       bluetooth: options.bluetooth,
+      deviceType: options.deviceType ?? "b2500",
     };
     this.explicitDisconnect = true;
 
@@ -321,16 +349,17 @@ class BLEDeviceManager {
         BLEDeviceManager.SERVICE_UUID,
       );
 
-      // Get characteristics
-      this.log("Getting command characteristic...");
+      // Get characteristics (UUIDs depend on device type)
+      const uuids = this.characteristicUUIDs;
+      this.log(
+        `Getting command characteristic (${uuids.command}, deviceType=${connectionOptions.deviceType ?? this.options.deviceType})...`,
+      );
       this.commandCharacteristic = await service.getCharacteristic(
-        BLEDeviceManager.COMMAND_CHARACTERISTIC_UUID,
+        uuids.command,
       );
 
-      this.log("Getting status characteristic...");
-      this.statusCharacteristic = await service.getCharacteristic(
-        BLEDeviceManager.STATUS_CHARACTERISTIC_UUID,
-      );
+      this.log(`Getting status characteristic (${uuids.status})...`);
+      this.statusCharacteristic = await service.getCharacteristic(uuids.status);
 
       // Setup notification handler for status characteristic
       await this.statusCharacteristic.startNotifications();
@@ -409,13 +438,14 @@ class BLEDeviceManager {
             BLEDeviceManager.SERVICE_UUID,
           );
 
-          // Get characteristics
+          // Get characteristics (UUIDs depend on device type)
+          const uuids = this.characteristicUUIDs;
           this.commandCharacteristic = await service.getCharacteristic(
-            BLEDeviceManager.COMMAND_CHARACTERISTIC_UUID,
+            uuids.command,
           );
 
           this.statusCharacteristic = await service.getCharacteristic(
-            BLEDeviceManager.STATUS_CHARACTERISTIC_UUID,
+            uuids.status,
           );
 
           // Setup notification handler
@@ -678,6 +708,14 @@ class BLEDeviceManager {
    */
   public setAutoReconnect(enable: boolean): void {
     this.options.autoReconnect = enable;
+  }
+
+  /**
+   * Set the device type. Takes effect on the next connect().
+   * Cannot be changed while connected.
+   */
+  public setDeviceType(type: DeviceType): void {
+    this.options.deviceType = type;
   }
 
   /**

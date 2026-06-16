@@ -9,4 +9,4 @@
 export { BLEDeviceManager } from "./BLEDeviceManager.js";
 
 // Export BLE-specific types
-export type { BLEManagerOptions, EventCallback } from "./types.js";
+export type { BLEManagerOptions, DeviceType, EventCallback } from "./types.js";

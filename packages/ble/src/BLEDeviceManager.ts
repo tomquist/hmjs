@@ -524,6 +524,34 @@ class BLEDeviceManager {
   }
 
   /**
+   * Write a value to the command characteristic.
+   *
+   * Prefers `writeValueWithoutResponse()`, but falls back to the older
+   * `writeValue()` method for Web Bluetooth implementations that don't
+   * expose it (e.g. Bluefy on iOS), which would otherwise throw
+   * "writeValueWithoutResponse is not a function".
+   *
+   * @param value Bytes to write
+   */
+  private async writeCommandValue(value: BufferSource): Promise<void> {
+    const characteristic = this.commandCharacteristic;
+    if (!characteristic) {
+      throw new Error("Not connected to device");
+    }
+
+    if (typeof characteristic.writeValueWithoutResponse === "function") {
+      await characteristic.writeValueWithoutResponse(value);
+    } else if (typeof characteristic.writeValue === "function") {
+      // Deprecated, but widely supported on older implementations.
+      await characteristic.writeValue(value);
+    } else {
+      throw new Error(
+        "Command characteristic does not support writing values",
+      );
+    }
+  }
+
+  /**
    * Send a command to the device and optionally wait for a response
    * @param commandType Command type
    * @param payload Optional payload data
@@ -548,11 +576,11 @@ class BLEDeviceManager {
     try {
       // Create the command message using the protocol
       const command = this.protocol.createCommandMessage(commandType, payload);
-      await this.commandCharacteristic.writeValueWithoutResponse(command);
+      await this.writeCommandValue(command);
 
       // Send twice for reliability if enabled
       if (cmdOptions.sendTwice) {
-        await this.commandCharacteristic.writeValueWithoutResponse(command);
+        await this.writeCommandValue(command);
       }
 
       this.log(`Command sent: 0x${commandType.toString(16)}`);
@@ -736,7 +764,7 @@ class BLEDeviceManager {
       );
 
       // Send the raw command
-      await this.commandCharacteristic.writeValueWithoutResponse(bytes);
+      await this.writeCommandValue(bytes);
 
       this.log(`Raw command sent successfully`);
     } catch (error) {

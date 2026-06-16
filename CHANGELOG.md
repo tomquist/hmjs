@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 ### Removed
 ### Fixed
+- Fall back to the deprecated `writeValue()` when the command characteristic
+  does not implement `writeValueWithoutResponse()`. This fixes
+  "writeValueWithoutResponse is not a function" errors on older Web Bluetooth
+  implementations such as Bluefy on iOS (#8).
 ### Security
 
 ## [0.1.0] - 2024-01-XX

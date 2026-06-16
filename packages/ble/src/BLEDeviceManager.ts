@@ -545,9 +545,7 @@ class BLEDeviceManager {
       // Deprecated, but widely supported on older implementations.
       await characteristic.writeValue(value);
     } else {
-      throw new Error(
-        "Command characteristic does not support writing values",
-      );
+      throw new Error("Command characteristic does not support writing values");
     }
   }
 

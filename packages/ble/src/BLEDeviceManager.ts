@@ -52,17 +52,20 @@ class BLEDeviceManager {
     bluetooth?: Bluetooth;
   };
 
-  private get characteristicUUIDs(): {
+  private getDeviceUUIDs(deviceType: DeviceType = this.options.deviceType): {
+    service: string;
     command: string;
     status: string;
   } {
-    if (this.options.deviceType === "tronic") {
+    if (deviceType === "tronic") {
       return {
+        service: BLEDeviceManager.TRONIC_SERVICE_UUID,
         command: BLEDeviceManager.TRONIC_COMMAND_UUID,
         status: BLEDeviceManager.TRONIC_STATUS_UUID,
       };
     }
     return {
+      service: BLEDeviceManager.SERVICE_UUID,
       command: BLEDeviceManager.B2500_COMMAND_UUID,
       status: BLEDeviceManager.B2500_STATUS_UUID,
     };
@@ -82,6 +85,8 @@ class BLEDeviceManager {
   static readonly B2500_STATUS_UUID = "0000ff02-0000-1000-8000-00805f9b34fb";
 
   // Tronic / 100-series (experimental)
+  // Service UUID is 0x00FF (000000ff-...), different from B2500's 0xFF00 (0000ff00-...)
+  static readonly TRONIC_SERVICE_UUID = "000000ff-0000-1000-8000-00805f9b34fb";
   static readonly TRONIC_COMMAND_UUID = "0000ff03-0000-1000-8000-00805f9b34fb";
   static readonly TRONIC_STATUS_UUID = "0000ff01-0000-1000-8000-00805f9b34fb";
 
@@ -272,14 +277,15 @@ class BLEDeviceManager {
     try {
       // Request device with appropriate filters. The Web Bluetooth API allows
       // either `filters` or `acceptAllDevices`, but not both at once.
+      const serviceUUID = this.getDeviceUUIDs(scanOptions.deviceType).service;
       const requestOptions = scanOptions.acceptAllDevices
         ? {
             acceptAllDevices: true,
-            optionalServices: [BLEDeviceManager.SERVICE_UUID],
+            optionalServices: [serviceUUID],
           }
         : {
             filters: [{ namePrefix: scanOptions.deviceNamePrefix }],
-            optionalServices: [BLEDeviceManager.SERVICE_UUID],
+            optionalServices: [serviceUUID],
           };
       const device = await bluetooth.requestDevice(requestOptions);
 
@@ -343,17 +349,15 @@ class BLEDeviceManager {
       this.log("Connecting to GATT server...");
       const server = await this.device.gatt!.connect();
 
-      // Get primary service
-      this.log(`Getting primary service (${BLEDeviceManager.SERVICE_UUID})...`);
-      const service = await server.getPrimaryService(
-        BLEDeviceManager.SERVICE_UUID,
-      );
-
-      // Get characteristics (UUIDs depend on device type)
-      const uuids = this.characteristicUUIDs;
+      // Get primary service (UUID depends on device type)
+      const uuids = this.getDeviceUUIDs(connectionOptions.deviceType);
       this.log(
-        `Getting command characteristic (${uuids.command}, deviceType=${connectionOptions.deviceType ?? this.options.deviceType})...`,
+        `Getting primary service (${uuids.service}, deviceType=${connectionOptions.deviceType ?? this.options.deviceType})...`,
       );
+      const service = await server.getPrimaryService(uuids.service);
+
+      // Get characteristics
+      this.log(`Getting command characteristic (${uuids.command})...`);
       this.commandCharacteristic = await service.getCharacteristic(
         uuids.command,
       );
@@ -433,13 +437,10 @@ class BLEDeviceManager {
           // Connect to GATT server
           const server = await lastDevice.gatt!.connect();
 
-          // Get primary service
-          const service = await server.getPrimaryService(
-            BLEDeviceManager.SERVICE_UUID,
-          );
+          // Get primary service (UUID depends on device type)
+          const uuids = this.getDeviceUUIDs(this.options.deviceType);
+          const service = await server.getPrimaryService(uuids.service);
 
-          // Get characteristics (UUIDs depend on device type)
-          const uuids = this.characteristicUUIDs;
           this.commandCharacteristic = await service.getCharacteristic(
             uuids.command,
           );

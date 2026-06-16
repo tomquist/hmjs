@@ -713,6 +713,14 @@ class BLEDeviceManager {
   }
 
   /**
+   * Set the device type. Takes effect on the next connect().
+   * Cannot be changed while connected.
+   */
+  public setDeviceType(type: DeviceType): void {
+    this.options.deviceType = type;
+  }
+
+  /**
    * Send raw bytes to the device
    * @param bytes Raw bytes to send as Uint8Array
    * @returns Promise that resolves when command is sent

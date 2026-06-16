@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { DeviceType } from "@tomquist/hmjs-ble";
 
 interface FoundDevice {
   device: BluetoothDevice;
@@ -13,10 +14,12 @@ interface ConnectionPanelProps {
   autoReconnect: boolean;
   selectedDevice: FoundDevice | null;
   allowAnyDevice: boolean;
+  deviceType: DeviceType;
   onScan: () => void;
   onDisconnect: () => void;
   onAutoReconnectChange: (checked: boolean) => void;
   onAllowAnyDeviceChange: (checked: boolean) => void;
+  onDeviceTypeChange: (type: DeviceType) => void;
 }
 
 const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
@@ -26,10 +29,12 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   autoReconnect,
   selectedDevice,
   allowAnyDevice,
+  deviceType,
   onScan,
   onDisconnect,
   onAutoReconnectChange,
   onAllowAnyDeviceChange,
+  onDeviceTypeChange,
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -85,6 +90,23 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               />
               Connect to any Bluetooth device
             </label>
+            <div className="device-type-selector">
+              <label htmlFor="device-type-select">Device type:</label>
+              <select
+                id="device-type-select"
+                value={deviceType}
+                disabled={isConnected}
+                onChange={(e) => onDeviceTypeChange(e.target.value as DeviceType)}
+              >
+                <option value="b2500">B2500 (default)</option>
+                <option value="tronic">Tronic / Lidl (experimental)</option>
+              </select>
+              {deviceType === "tronic" && (
+                <p className="device-type-warning">
+                  ⚠️ Experimental: Tronic support is untested and may not work correctly.
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>

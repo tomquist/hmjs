@@ -96,14 +96,17 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 id="device-type-select"
                 value={deviceType}
                 disabled={isConnected}
-                onChange={(e) => onDeviceTypeChange(e.target.value as DeviceType)}
+                onChange={(e) =>
+                  onDeviceTypeChange(e.target.value as DeviceType)
+                }
               >
                 <option value="b2500">B2500 (default)</option>
                 <option value="tronic">Tronic / Lidl (experimental)</option>
               </select>
               {deviceType === "tronic" && (
                 <p className="device-type-warning">
-                  ⚠️ Experimental: Tronic support is untested and may not work correctly.
+                  ⚠️ Experimental: Tronic support is untested and may not work
+                  correctly.
                 </p>
               )}
             </div>

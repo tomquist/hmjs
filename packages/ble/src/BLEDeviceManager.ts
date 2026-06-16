@@ -359,9 +359,7 @@ class BLEDeviceManager {
       );
 
       this.log(`Getting status characteristic (${uuids.status})...`);
-      this.statusCharacteristic = await service.getCharacteristic(
-        uuids.status,
-      );
+      this.statusCharacteristic = await service.getCharacteristic(uuids.status);
 
       // Setup notification handler for status characteristic
       await this.statusCharacteristic.startNotifications();

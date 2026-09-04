@@ -4,6 +4,8 @@ import {
   DeviceInfo,
   RuntimeInfo,
   CellInfo,
+  TimerInfo,
+  TimerInfoResponse,
   MQTTConfig,
   HMDeviceProtocol,
 } from "@tomquist/hmjs-protocol";
@@ -14,6 +16,7 @@ import {
   DeviceInfoTab,
   RuntimeTab,
   CellInfoTab,
+  TimersTab,
   ConfigurationTab,
   AdvancedTab,
 } from "./components";
@@ -24,6 +27,7 @@ enum TabType {
   DeviceInfo = "device-info-tab",
   Runtime = "runtime-tab",
   CellInfo = "cell-tab",
+  Timers = "timers-tab",
   Configuration = "config-tab",
   Advanced = "advanced-tab",
 }
@@ -69,6 +73,9 @@ const App: React.FC = () => {
 
   // Cell info state
   const [cellInfo, setCellInfo] = useState<CellInfo | null>(null);
+
+  // Timer schedule state
+  const [timerInfo, setTimerInfo] = useState<TimerInfoResponse | null>(null);
 
   // Logs state
   const [logs, setLogs] = useState<string[]>([]);
@@ -198,6 +205,7 @@ const App: React.FC = () => {
       setDeviceInfo(null);
       setRuntimeInfo(null);
       setCellInfo(null);
+      setTimerInfo(null);
       setInfoStatus("-");
       setLastUpdateTime("-");
       setSelectedDevice(null);
@@ -236,6 +244,11 @@ const App: React.FC = () => {
         `Received cell info: SOC=${info.soc}%, Temp=${info.temperature1}°C, Cells=${info.cellVoltages.length}`,
       );
       setCellInfo(info);
+    });
+
+    deviceManager.on("timerInfo", (info: TimerInfoResponse) => {
+      logFunction(`Received timer schedule: ${info.timers.length} timer entries`);
+      setTimerInfo(info);
     });
 
     deviceManager.on("rawData", (data: Uint8Array) => {
@@ -286,6 +299,10 @@ const App: React.FC = () => {
       else if (activeTab === TabType.CellInfo) {
         getCellInfo();
       }
+      // Timers tab
+      else if (activeTab === TabType.Timers) {
+        getTimerSchedule();
+      }
     }
 
     // Update previous tab reference
@@ -304,6 +321,7 @@ const App: React.FC = () => {
       setDeviceInfo(null);
       setRuntimeInfo(null);
       setCellInfo(null);
+      setTimerInfo(null);
       setInfoStatus("-");
       setLastUpdateTime("-");
 
@@ -363,6 +381,7 @@ const App: React.FC = () => {
       setDeviceInfo(null);
       setRuntimeInfo(null);
       setCellInfo(null);
+      setTimerInfo(null);
       setInfoStatus("-");
       setLastUpdateTime("-");
       setSelectedDevice(null);
@@ -510,6 +529,102 @@ const App: React.FC = () => {
     } catch (error) {
       addLog(
         `Error getting cell info: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
+  // Set WiFi config
+  const getTimerSchedule = async () => {
+    try {
+      if (deviceManagerRef.current) {
+        const deviceManager = deviceManagerRef.current;
+
+        addLog(
+          `Connection state before getTimers: isConnected=${deviceManager.isConnected()}`,
+        );
+
+        if (
+          !deviceManager.isConnected() &&
+          isConnected &&
+          (deviceManager as any)._selectedDevice
+        ) {
+          addLog("Connection state mismatch - attempting to reconnect...");
+          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          try {
+            await deviceManager.connect(savedDevice);
+            addLog("Reconnection successful");
+          } catch (reconnectError) {
+            addLog(
+              `Reconnection failed: ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`,
+            );
+            setIsConnected(false);
+            throw new Error("Failed to reconnect to device");
+          }
+        }
+
+        addLog("Sending getTimers command...");
+        await deviceManager.getTimers();
+        addLog("Timer schedule request successful");
+
+        setIsConnected(true);
+      }
+    } catch (error) {
+      addLog(
+        `Error getting timer schedule: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
+  const setTimerSchedule = async (timers: TimerInfo[]) => {
+    if (!timers.length) {
+      alert("At least one timer is required");
+      return;
+    }
+
+    if (!confirm(`Set ${timers.length} timer entries on device?`)) {
+      return;
+    }
+
+    try {
+      if (deviceManagerRef.current) {
+        const deviceManager = deviceManagerRef.current;
+
+        addLog(
+          `Connection state before setTimers: isConnected=${deviceManager.isConnected()}`,
+        );
+
+        if (
+          !deviceManager.isConnected() &&
+          isConnected &&
+          (deviceManager as any)._selectedDevice
+        ) {
+          addLog("Connection state mismatch - attempting to reconnect...");
+          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          try {
+            await deviceManager.connect(savedDevice);
+            addLog("Reconnection successful");
+          } catch (reconnectError) {
+            addLog(
+              `Reconnection failed: ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`,
+            );
+            setIsConnected(false);
+            throw new Error("Failed to reconnect to device");
+          }
+        }
+
+        addLog(`Sending setTimers command with ${timers.length} entries...`);
+        await deviceManager.setTimers(timers);
+        addLog("Timer schedule sent successfully");
+        alert("Timer schedule sent successfully");
+
+        setIsConnected(true);
+      }
+    } catch (error) {
+      addLog(
+        `Error setting timer schedule: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      alert(
+        `Failed to set timer schedule: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   };
@@ -860,6 +975,12 @@ const App: React.FC = () => {
           Cell Info
         </button>
         <button
+          className={`tab-button ${activeTab === TabType.Timers ? "active" : ""}`}
+          onClick={() => setActiveTab(TabType.Timers)}
+        >
+          Timers
+        </button>
+        <button
           className={`tab-button ${activeTab === TabType.Configuration ? "active" : ""}`}
           onClick={() => setActiveTab(TabType.Configuration)}
         >
@@ -897,6 +1018,15 @@ const App: React.FC = () => {
             cellInfo={cellInfo}
             isConnected={isConnected}
             onGetCellInfo={getCellInfo}
+          />
+        )}
+
+        {activeTab === TabType.Timers && (
+          <TimersTab
+            timerInfo={timerInfo}
+            isConnected={isConnected}
+            onGetTimers={getTimerSchedule}
+            onSetTimers={setTimerSchedule}
           />
         )}
 

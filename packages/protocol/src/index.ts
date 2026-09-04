@@ -20,6 +20,8 @@ export type {
   DeviceInfo,
   RuntimeInfo,
   CellInfo,
+  TimerInfo,
+  TimerInfoResponse,
   WifiMqttState,
   MQTTConfig,
 } from "./types.js";

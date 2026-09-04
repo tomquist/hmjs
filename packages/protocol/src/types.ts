@@ -31,6 +31,52 @@ export interface CellInfo {
 }
 
 /**
+ * Single timer entry as returned by timer schedule responses
+ */
+export interface TimerInfo {
+  /** Whether this timer entry is enabled */
+  enabled: boolean;
+  /** Start time */
+  start: {
+    /** Hour (0-23) */
+    hour: number;
+    /** Minute (0-59) */
+    minute: number;
+  };
+  /** End time */
+  end: {
+    /** Hour (0-23) */
+    hour: number;
+    /** Minute (0-59) */
+    minute: number;
+  };
+  /** Output power in watts (uint16, little-endian) */
+  outputPower: number;
+}
+
+/**
+ * Parsed response for command 0x13 (Get Timers)
+ */
+export interface TimerInfoResponse {
+  /** Start byte header */
+  head: number;
+  /** Data length */
+  dataLength: number;
+  /** Control byte */
+  cntl: number;
+  /** Command type */
+  command: number;
+  /** Raw payload bytes (message body excluding header/checksum) */
+  rawPayload: Uint8Array;
+  /** Parsed timer entries found in payload */
+  timers: TimerInfo[];
+  /** Byte offset in payload where timer entries begin */
+  timerDataOffset: number;
+  /** Any bytes after timer entries (if present) */
+  trailingData: Uint8Array;
+}
+
+/**
  * WiFi and MQTT connection status
  */
 export interface WifiMqttState {

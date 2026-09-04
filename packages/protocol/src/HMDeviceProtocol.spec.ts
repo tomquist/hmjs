@@ -1,4 +1,9 @@
-import { HMDeviceProtocol, COMMANDS, MQTTConfig } from "./HMDeviceProtocol.js";
+import {
+  HMDeviceProtocol,
+  COMMANDS,
+  MQTTConfig,
+  TimerInfo,
+} from "./HMDeviceProtocol.js";
 import "fast-text-encoding";
 
 describe("HMDeviceProtocol", () => {
@@ -178,6 +183,136 @@ describe("HMDeviceProtocol", () => {
         throw new Error("Expected unknown message type");
       }
     });
+
+    it("should parse get timers response and decode timer entries", () => {
+      const messageBytes = new Uint8Array([
+        0x73, 0x3b, 0x23, 0x13, 0x00, 0x01, 0x13, 0x00, 0x16, 0x1b, 0xbc,
+        0x02, 0x01, 0x16, 0x1c, 0x17, 0x3b, 0xf4, 0x01, 0x01, 0x00, 0x00,
+        0x02, 0x00, 0xbc, 0x02, 0x00, 0x28, 0x00, 0x00, 0x00, 0x78, 0x00,
+        0xff, 0x00, 0x5e, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x00, 0x0d, 0x3b, 0xf4, 0x01, 0x00, 0x00, 0x00, 0x17, 0x3b,
+        0x50, 0x00, 0x07, 0xf7,
+      ]);
+
+      const dataView = new DataView(messageBytes.buffer);
+      const result = protocol.parseMessage(dataView);
+
+      if (result.type === COMMANDS.GET_TIMERS) {
+        expect(result.data.timers).toHaveLength(5);
+
+        expect(result.data.timers[0]).toEqual({
+          enabled: true,
+          start: { hour: 19, minute: 0 },
+          end: { hour: 22, minute: 27 },
+          outputPower: 700,
+        });
+
+        expect(result.data.timers[1]).toEqual({
+          enabled: true,
+          start: { hour: 22, minute: 28 },
+          end: { hour: 23, minute: 59 },
+          outputPower: 500,
+        });
+
+        expect(result.data.timers[2]).toEqual({
+          enabled: true,
+          start: { hour: 0, minute: 0 },
+          end: { hour: 2, minute: 0 },
+          outputPower: 700,
+        });
+
+        expect(result.data.timers[3]).toEqual({
+          enabled: true,
+          start: { hour: 8, minute: 0 },
+          end: { hour: 13, minute: 59 },
+          outputPower: 500,
+        });
+
+        expect(result.data.timers[4]).toEqual({
+          enabled: false,
+          start: { hour: 0, minute: 0 },
+          end: { hour: 23, minute: 59 },
+          outputPower: 80,
+        });
+      } else {
+        throw new Error("Expected get timers message");
+      }
+    });
+
+    it("should parse timers using tail fallback when known offsets are absent", () => {
+      const payload = new Uint8Array([
+        0xaa,
+        0xbb,
+        0xcc,
+        0x01,
+        0x06,
+        0x30,
+        0x07,
+        0x2d,
+        0xc8,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x17,
+        0x3b,
+        0x50,
+        0x00,
+      ]);
+
+      const messageBytes = new Uint8Array(4 + payload.length + 1);
+      messageBytes[0] = 0x73;
+      messageBytes[1] = messageBytes.length;
+      messageBytes[2] = 0x23;
+      messageBytes[3] = COMMANDS.GET_TIMERS;
+      messageBytes.set(payload, 4);
+      messageBytes[messageBytes.length - 1] = protocol.calculateChecksum(
+        messageBytes.slice(0, -1),
+      );
+
+      const dataView = new DataView(messageBytes.buffer);
+      const result = protocol.parseMessage(dataView);
+
+      if (result.type === COMMANDS.GET_TIMERS) {
+        expect(result.data.timers).toHaveLength(2);
+        expect(result.data.timers[0]).toEqual({
+          enabled: true,
+          start: { hour: 6, minute: 48 },
+          end: { hour: 7, minute: 45 },
+          outputPower: 200,
+        });
+        expect(result.data.timers[1]).toEqual({
+          enabled: false,
+          start: { hour: 0, minute: 0 },
+          end: { hour: 23, minute: 59 },
+          outputPower: 80,
+        });
+      } else {
+        throw new Error("Expected get timers message");
+      }
+    });
+
+    it("should return empty timers when payload does not contain valid entries", () => {
+      const payload = new Uint8Array([0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa]);
+      const messageBytes = new Uint8Array(4 + payload.length + 1);
+      messageBytes[0] = 0x73;
+      messageBytes[1] = messageBytes.length;
+      messageBytes[2] = 0x23;
+      messageBytes[3] = COMMANDS.GET_TIMERS;
+      messageBytes.set(payload, 4);
+      messageBytes[messageBytes.length - 1] = protocol.calculateChecksum(
+        messageBytes.slice(0, -1),
+      );
+
+      const dataView = new DataView(messageBytes.buffer);
+      const result = protocol.parseMessage(dataView);
+
+      if (result.type === COMMANDS.GET_TIMERS) {
+        expect(result.data.timers).toEqual([]);
+      } else {
+        throw new Error("Expected get timers message");
+      }
+    });
   });
 
   describe("createWifiConfigPayload", () => {
@@ -213,6 +348,46 @@ describe("HMDeviceProtocol", () => {
       const payload = protocol.createMqttConfigPayload(config);
       const expectedStr = `0<.,.>${config.host}<.,.>${config.port}<.,.><.,.><.,.>`;
       expect(protocol.bytesToString(payload)).toBe(expectedStr);
+    });
+  });
+
+  describe("createTimerConfigPayload", () => {
+    it("should encode timer entries as 7-byte records", () => {
+      const timers: TimerInfo[] = [
+        {
+          enabled: true,
+          start: { hour: 19, minute: 0 },
+          end: { hour: 22, minute: 27 },
+          outputPower: 700,
+        },
+        {
+          enabled: false,
+          start: { hour: 0, minute: 0 },
+          end: { hour: 23, minute: 59 },
+          outputPower: 80,
+        },
+      ];
+
+      const payload = protocol.createTimerConfigPayload(timers);
+      expect(Array.from(payload)).toEqual([
+        0x01, 0x13, 0x00, 0x16, 0x1b, 0xbc, 0x02, 0x00, 0x00, 0x00, 0x17,
+        0x3b, 0x50, 0x00,
+      ]);
+    });
+
+    it("should reject out-of-range timer values", () => {
+      const invalid: TimerInfo[] = [
+        {
+          enabled: true,
+          start: { hour: 30, minute: 0 },
+          end: { hour: 22, minute: 27 },
+          outputPower: 700,
+        },
+      ];
+
+      expect(() => protocol.createTimerConfigPayload(invalid)).toThrow(
+        "start hour must be 0-23",
+      );
     });
   });
 });

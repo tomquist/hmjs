@@ -20,6 +20,30 @@ export interface CellInfo {
   cellVoltages: number[];
 }
 
+export interface TimerInfo {
+  enabled: boolean;
+  start: {
+    hour: number;
+    minute: number;
+  };
+  end: {
+    hour: number;
+    minute: number;
+  };
+  outputPower: number;
+}
+
+export interface TimerInfoResponse {
+  head: number;
+  dataLength: number;
+  cntl: number;
+  command: number;
+  rawPayload: Uint8Array;
+  timers: TimerInfo[];
+  timerDataOffset: number;
+  trailingData: Uint8Array;
+}
+
 export interface WifiMqttState {
   wifiConnected: boolean;
   mqttConnected: boolean;
@@ -92,6 +116,8 @@ export interface MQTTConfig {
 export const COMMANDS = {
   RUNTIME_INFO: 0x03,
   DEVICE_INFO: 0x04,
+  SET_TIMERS: 0x12,
+  GET_TIMERS: 0x13,
   CELL_INFO: 0x0f,
   SET_WIFI: 0x05,
   SET_MQTT: 0x20,
@@ -119,6 +145,10 @@ export type ParsedMessage = {
   | {
       type: typeof COMMANDS.DEVICE_INFO;
       data: DeviceInfo;
+    }
+  | {
+      type: typeof COMMANDS.GET_TIMERS;
+      data: TimerInfoResponse;
     }
   | {
       type: "unknown";
@@ -349,6 +379,12 @@ export class HMDeviceProtocol {
           rawData,
           data: this.parseDeviceInfo(message),
         };
+      case COMMANDS.GET_TIMERS:
+        return {
+          type: COMMANDS.GET_TIMERS,
+          rawData,
+          data: this.parseTimerInfo(message),
+        };
       default:
         return {
           type: "unknown",
@@ -541,6 +577,149 @@ export class HMDeviceProtocol {
   }
 
   /**
+   * Parse timer information payload from command 0x13 responses
+   * @param dataView Full response frame
+   * @returns Parsed timer response
+   */
+  public parseTimerInfo(dataView: DataView<ArrayBufferLike>): TimerInfoResponse {
+    const rawPayload = new Uint8Array(
+      dataView.buffer,
+      dataView.byteOffset + 4,
+      Math.max(0, dataView.byteLength - 5),
+    );
+
+    const parsedTimers = this.extractTimersFromPayload(rawPayload);
+
+    return {
+      head: dataView.getUint8(0),
+      dataLength: dataView.getUint8(1),
+      cntl: dataView.getUint8(2),
+      command: dataView.getUint8(3),
+      rawPayload,
+      timers: parsedTimers.timers,
+      timerDataOffset: parsedTimers.offset,
+      trailingData: parsedTimers.trailingData,
+    };
+  }
+
+  private extractTimersFromPayload(payload: Uint8Array): {
+    timers: TimerInfo[];
+    offset: number;
+    trailingData: Uint8Array;
+  } {
+    const timers: TimerInfo[] = [];
+    const timerOffsets: number[] = [];
+
+    // Known packet layout from firmware docs/captures:
+    // payload[1..21] -> 3 base timers (3 x 7 bytes)
+    // payload[39..52] -> 2 additional timers (2 x 7 bytes)
+    const knownOffsets = [1, 8, 15, 39, 46];
+
+    for (const offset of knownOffsets) {
+      if (offset + 6 < payload.length && this.isLikelyTimerEntry(payload, offset)) {
+        timers.push(this.parseTimerEntry(payload, offset));
+        timerOffsets.push(offset);
+      }
+    }
+
+    if (timers.length > 0) {
+      const firstOffset = Math.min(...timerOffsets);
+      const lastOffset = Math.max(...timerOffsets);
+      return {
+        timers,
+        offset: firstOffset,
+        trailingData: payload.slice(lastOffset + 7),
+      };
+    }
+
+    return this.extractTimersFromTail(payload);
+  }
+
+  private extractTimersFromTail(payload: Uint8Array): {
+    timers: TimerInfo[];
+    offset: number;
+    trailingData: Uint8Array;
+  } {
+    const maxTrailingBytes = Math.min(7, payload.length);
+
+    for (let trailingBytes = 0; trailingBytes <= maxTrailingBytes; trailingBytes++) {
+      const end = payload.length - trailingBytes;
+      const reversedTimers: TimerInfo[] = [];
+
+      let pos = end - 7;
+      while (pos >= 0 && this.isLikelyTimerEntry(payload, pos)) {
+        reversedTimers.push(this.parseTimerEntry(payload, pos));
+        pos -= 7;
+      }
+
+      if (reversedTimers.length > 0) {
+        const offset = pos + 7;
+        return {
+          timers: reversedTimers.reverse(),
+          offset,
+          trailingData: payload.slice(end),
+        };
+      }
+    }
+
+    return {
+      timers: [],
+      offset: payload.length,
+      trailingData: new Uint8Array(),
+    };
+  }
+
+  private parseTimerEntry(payload: Uint8Array, offset: number): TimerInfo {
+    return {
+      enabled: payload[offset] === 0x01,
+      start: {
+        hour: payload[offset + 1],
+        minute: payload[offset + 2],
+      },
+      end: {
+        hour: payload[offset + 3],
+        minute: payload[offset + 4],
+      },
+      outputPower: payload[offset + 5] | (payload[offset + 6] << 8),
+    };
+  }
+
+  private isLikelyTimerEntry(payload: Uint8Array, offset: number): boolean {
+    const enabled = payload[offset];
+    const startHour = payload[offset + 1];
+    const startMinute = payload[offset + 2];
+    const endHour = payload[offset + 3];
+    const endMinute = payload[offset + 4];
+    const outputPower = payload[offset + 5] | (payload[offset + 6] << 8);
+
+    const inRange =
+      (enabled === 0x00 || enabled === 0x01) &&
+      startHour <= 23 &&
+      endHour <= 23 &&
+      startMinute <= 59 &&
+      endMinute <= 59 &&
+      outputPower <= 10000;
+
+    if (!inRange) {
+      return false;
+    }
+
+    // Enabled entries should represent an actual active schedule.
+    if (
+      enabled === 0x01 &&
+      startHour === 0 &&
+      startMinute === 0 &&
+      endHour === 0 &&
+      endMinute === 0 &&
+      outputPower === 0
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
    * Create a wifi configuration command payload
    * @param ssid WiFi SSID
    * @param password WiFi password
@@ -570,6 +749,51 @@ export class HMDeviceProtocol {
     const sslEnabled = config.ssl ? "1" : "0";
     const configStr = `${sslEnabled}<.,.>${config.host}<.,.>${config.port}<.,.>${config.username || ""}<.,.>${config.password || ""}<.,.>`;
     return this.stringToBytes(configStr);
+  }
+
+  /**
+   * Create a timer configuration payload for command 0x12
+   * @param timers Timer entries to write
+   * @returns Payload bytes (7 bytes per timer)
+   */
+  public createTimerConfigPayload(timers: TimerInfo[]): Uint8Array {
+    if (!timers.length) {
+      throw new Error("At least one timer is required");
+    }
+
+    const payload = new Uint8Array(timers.length * 7);
+
+    timers.forEach((timer, index) => {
+      this.validateTimer(timer, index);
+      const offset = index * 7;
+      payload[offset] = timer.enabled ? 0x01 : 0x00;
+      payload[offset + 1] = timer.start.hour;
+      payload[offset + 2] = timer.start.minute;
+      payload[offset + 3] = timer.end.hour;
+      payload[offset + 4] = timer.end.minute;
+      payload[offset + 5] = timer.outputPower & 0xff;
+      payload[offset + 6] = (timer.outputPower >> 8) & 0xff;
+    });
+
+    return payload;
+  }
+
+  private validateTimer(timer: TimerInfo, index: number): void {
+    if (timer.start.hour < 0 || timer.start.hour > 23) {
+      throw new Error(`Timer ${index + 1}: start hour must be 0-23`);
+    }
+    if (timer.start.minute < 0 || timer.start.minute > 59) {
+      throw new Error(`Timer ${index + 1}: start minute must be 0-59`);
+    }
+    if (timer.end.hour < 0 || timer.end.hour > 23) {
+      throw new Error(`Timer ${index + 1}: end hour must be 0-23`);
+    }
+    if (timer.end.minute < 0 || timer.end.minute > 59) {
+      throw new Error(`Timer ${index + 1}: end minute must be 0-59`);
+    }
+    if (timer.outputPower < 0 || timer.outputPower > 65535) {
+      throw new Error(`Timer ${index + 1}: output power must be 0-65535`);
+    }
   }
 }
 

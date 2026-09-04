@@ -7,6 +7,8 @@ import {
   DeviceInfo,
   RuntimeInfo,
   CellInfo,
+  TimerInfo,
+  TimerInfoResponse,
   MQTTConfig,
   HMDeviceProtocol,
 } from "@tomquist/hmjs-protocol";
@@ -25,6 +27,7 @@ type EventCallbackArgs = {
   deviceInfo: [DeviceInfo];
   runtimeInfo: [RuntimeInfo];
   cellInfo: [CellInfo];
+  timerInfo: [TimerInfoResponse];
   rawData: [Uint8Array];
 };
 
@@ -104,6 +107,7 @@ class BLEDeviceManager {
     deviceInfo: [],
     runtimeInfo: [],
     cellInfo: [],
+    timerInfo: [],
     error: [],
     rawData: [],
   };
@@ -506,6 +510,9 @@ class BLEDeviceManager {
         case COMMAND_TYPES.CELL_INFO:
           this._triggerEvent("cellInfo", msg.data);
           break;
+        case COMMAND_TYPES.GET_TIMERS:
+          this._triggerEvent("timerInfo", msg.data);
+          break;
         default:
           // Handle unknown command type
           this.log(
@@ -670,6 +677,46 @@ class BLEDeviceManager {
         reject(error);
       });
     });
+  }
+
+  /**
+   * Get timer schedule information
+   * @returns Parsed timer schedule response
+   */
+  public async getTimers(options?: {
+    timeout?: number;
+  }): Promise<TimerInfoResponse> {
+    const { timeout = 5000 } = options ?? {};
+    return new Promise((resolve, reject) => {
+      const eventHandler = (data: TimerInfoResponse) => {
+        this.off("timerInfo", eventHandler);
+        clearTimeout(timeoutId);
+        resolve(data);
+      };
+      const timeoutId = setTimeout(() => {
+        this.off("timerInfo", eventHandler);
+        reject(new Error("Command timed out"));
+      }, timeout);
+      this.on("timerInfo", eventHandler);
+      this.sendCommand(COMMAND_TYPES.GET_TIMERS, [0x00]).catch((error) => {
+        this.off("timerInfo", eventHandler);
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * Set timer schedule entries
+   * @param timers Timer entries to write
+   */
+  public async setTimers(timers: TimerInfo[]): Promise<void> {
+    if (!timers.length) {
+      throw new Error("At least one timer is required");
+    }
+
+    const payload = this.protocol.createTimerConfigPayload(timers);
+    await this.sendCommand(COMMAND_TYPES.SET_TIMERS, payload);
   }
 
   /**

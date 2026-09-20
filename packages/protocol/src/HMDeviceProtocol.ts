@@ -33,15 +33,22 @@ export interface TimerInfo {
   outputPower: number;
 }
 
+export interface SmartMeterInfo {
+  connected: boolean;
+  powerOut: number;
+  meterReading: number;
+  unknown: number;
+}
+
 export interface TimerInfoResponse {
   head: number;
   dataLength: number;
   cntl: number;
   command: number;
   rawPayload: Uint8Array;
+  adaptiveModeEnabled: boolean;
   timers: TimerInfo[];
-  timerDataOffset: number;
-  trailingData: Uint8Array;
+  smartMeter: SmartMeterInfo | null;
 }
 
 export interface WifiMqttState {
@@ -123,6 +130,24 @@ export const COMMANDS = {
   SET_MQTT: 0x20,
   RESET_MQTT: 0x21,
 } as const;
+
+/** Size of a single timer entry in bytes */
+export const TIMER_ENTRY_SIZE = 7;
+
+/** Number of timer slots supported by firmware < 218 */
+export const BASE_TIMER_SLOT_COUNT = 3;
+
+/** Number of timer slots supported by firmware >= 218 */
+export const EXTENDED_TIMER_SLOT_COUNT = 5;
+
+// Payload offsets of the timer slots within a 0x13 response
+const TIMER_SLOT_OFFSETS = [1, 8, 15, 39, 46] as const;
+const SMART_METER_OFFSET = 22;
+
+// adaptive mode byte + 3 timer slots + smart meter info
+const BASE_TIMER_PAYLOAD_SIZE = 29;
+// ... + 10 reserved bytes + 2 additional timer slots
+const EXTENDED_TIMER_PAYLOAD_SIZE = 53;
 
 export const PARSE_ERROR = {
   INVALID_START_BYTE: "Invalid start byte",
@@ -578,17 +603,48 @@ export class HMDeviceProtocol {
 
   /**
    * Parse timer information payload from command 0x13 responses
+   *
+   * The payload has a fixed layout (offsets relative to the start of the
+   * payload, i.e. after the 4 header bytes):
+   *
+   * ```
+   *  0      adaptive mode enabled (uint8)
+   *  1      timer slot 1  \
+   *  8      timer slot 2   |  7 bytes each
+   * 15      timer slot 3  /
+   * 22      smart meter info (7 bytes)
+   * 29      reserved (10 bytes)  \
+   * 39      timer slot 4          |  only sent by firmware >= 218,
+   * 46      timer slot 5         /   which supports 5 timer slots
+   * ```
+   *
+   * Devices with firmware < 218 only support the first three slots and send
+   * the shorter payload.
+   *
    * @param dataView Full response frame
    * @returns Parsed timer response
    */
-  public parseTimerInfo(dataView: DataView<ArrayBufferLike>): TimerInfoResponse {
+  public parseTimerInfo(
+    dataView: DataView<ArrayBufferLike>,
+  ): TimerInfoResponse {
+    // Copy the payload so that it stays valid even if the transport reuses
+    // the underlying buffer for the next notification.
     const rawPayload = new Uint8Array(
       dataView.buffer,
       dataView.byteOffset + 4,
       Math.max(0, dataView.byteLength - 5),
-    );
+    ).slice();
 
-    const parsedTimers = this.extractTimersFromPayload(rawPayload);
+    let slotCount = 0;
+    if (rawPayload.length >= EXTENDED_TIMER_PAYLOAD_SIZE) {
+      slotCount = EXTENDED_TIMER_SLOT_COUNT;
+    } else if (rawPayload.length >= BASE_TIMER_PAYLOAD_SIZE) {
+      slotCount = BASE_TIMER_SLOT_COUNT;
+    } else {
+      this.log?.(
+        `Timer payload too short: expected at least ${BASE_TIMER_PAYLOAD_SIZE} bytes, got ${rawPayload.length}`,
+      );
+    }
 
     return {
       head: dataView.getUint8(0),
@@ -596,76 +652,14 @@ export class HMDeviceProtocol {
       cntl: dataView.getUint8(2),
       command: dataView.getUint8(3),
       rawPayload,
-      timers: parsedTimers.timers,
-      timerDataOffset: parsedTimers.offset,
-      trailingData: parsedTimers.trailingData,
-    };
-  }
-
-  private extractTimersFromPayload(payload: Uint8Array): {
-    timers: TimerInfo[];
-    offset: number;
-    trailingData: Uint8Array;
-  } {
-    const timers: TimerInfo[] = [];
-    const timerOffsets: number[] = [];
-
-    // Known packet layout from firmware docs/captures:
-    // payload[1..21] -> 3 base timers (3 x 7 bytes)
-    // payload[39..52] -> 2 additional timers (2 x 7 bytes)
-    const knownOffsets = [1, 8, 15, 39, 46];
-
-    for (const offset of knownOffsets) {
-      if (offset + 6 < payload.length && this.isLikelyTimerEntry(payload, offset)) {
-        timers.push(this.parseTimerEntry(payload, offset));
-        timerOffsets.push(offset);
-      }
-    }
-
-    if (timers.length > 0) {
-      const firstOffset = Math.min(...timerOffsets);
-      const lastOffset = Math.max(...timerOffsets);
-      return {
-        timers,
-        offset: firstOffset,
-        trailingData: payload.slice(lastOffset + 7),
-      };
-    }
-
-    return this.extractTimersFromTail(payload);
-  }
-
-  private extractTimersFromTail(payload: Uint8Array): {
-    timers: TimerInfo[];
-    offset: number;
-    trailingData: Uint8Array;
-  } {
-    const maxTrailingBytes = Math.min(7, payload.length);
-
-    for (let trailingBytes = 0; trailingBytes <= maxTrailingBytes; trailingBytes++) {
-      const end = payload.length - trailingBytes;
-      const reversedTimers: TimerInfo[] = [];
-
-      let pos = end - 7;
-      while (pos >= 0 && this.isLikelyTimerEntry(payload, pos)) {
-        reversedTimers.push(this.parseTimerEntry(payload, pos));
-        pos -= 7;
-      }
-
-      if (reversedTimers.length > 0) {
-        const offset = pos + 7;
-        return {
-          timers: reversedTimers.reverse(),
-          offset,
-          trailingData: payload.slice(end),
-        };
-      }
-    }
-
-    return {
-      timers: [],
-      offset: payload.length,
-      trailingData: new Uint8Array(),
+      adaptiveModeEnabled: slotCount > 0 && rawPayload[0] === 0x01,
+      timers: TIMER_SLOT_OFFSETS.slice(0, slotCount).map((offset) =>
+        this.parseTimerEntry(rawPayload, offset),
+      ),
+      smartMeter:
+        slotCount > 0
+          ? this.parseSmartMeterInfo(rawPayload, SMART_METER_OFFSET)
+          : null,
     };
   }
 
@@ -684,39 +678,21 @@ export class HMDeviceProtocol {
     };
   }
 
-  private isLikelyTimerEntry(payload: Uint8Array, offset: number): boolean {
-    const enabled = payload[offset];
-    const startHour = payload[offset + 1];
-    const startMinute = payload[offset + 2];
-    const endHour = payload[offset + 3];
-    const endMinute = payload[offset + 4];
-    const outputPower = payload[offset + 5] | (payload[offset + 6] << 8);
-
-    const inRange =
-      (enabled === 0x00 || enabled === 0x01) &&
-      startHour <= 23 &&
-      endHour <= 23 &&
-      startMinute <= 59 &&
-      endMinute <= 59 &&
-      outputPower <= 10000;
-
-    if (!inRange) {
-      return false;
-    }
-
-    // Enabled entries should represent an actual active schedule.
-    if (
-      enabled === 0x01 &&
-      startHour === 0 &&
-      startMinute === 0 &&
-      endHour === 0 &&
-      endMinute === 0 &&
-      outputPower === 0
-    ) {
-      return false;
-    }
-
-    return true;
+  private parseSmartMeterInfo(
+    payload: Uint8Array,
+    offset: number,
+  ): SmartMeterInfo {
+    const view = new DataView(
+      payload.buffer,
+      payload.byteOffset,
+      payload.byteLength,
+    );
+    return {
+      connected: payload[offset] === 0x01,
+      powerOut: view.getUint16(offset + 1, true),
+      meterReading: view.getInt16(offset + 3, true),
+      unknown: view.getUint16(offset + 5, true),
+    };
   }
 
   /**
@@ -753,19 +729,30 @@ export class HMDeviceProtocol {
 
   /**
    * Create a timer configuration payload for command 0x12
-   * @param timers Timer entries to write
+   *
+   * The device rewrites all of its timer slots from a single command, so the
+   * full set of slots has to be sent: 3 entries for firmware < 218, 5 entries
+   * otherwise. Use the slot count reported by {@link parseTimerInfo} and keep
+   * the slots you do not want to change unmodified.
+   *
+   * @param timers Timer entries to write (one per device slot)
    * @returns Payload bytes (7 bytes per timer)
    */
   public createTimerConfigPayload(timers: TimerInfo[]): Uint8Array {
-    if (!timers.length) {
-      throw new Error("At least one timer is required");
+    if (
+      timers.length !== BASE_TIMER_SLOT_COUNT &&
+      timers.length !== EXTENDED_TIMER_SLOT_COUNT
+    ) {
+      throw new Error(
+        `Expected ${BASE_TIMER_SLOT_COUNT} or ${EXTENDED_TIMER_SLOT_COUNT} timer entries, got ${timers.length}`,
+      );
     }
 
-    const payload = new Uint8Array(timers.length * 7);
+    const payload = new Uint8Array(timers.length * TIMER_ENTRY_SIZE);
 
     timers.forEach((timer, index) => {
       this.validateTimer(timer, index);
-      const offset = index * 7;
+      const offset = index * TIMER_ENTRY_SIZE;
       payload[offset] = timer.enabled ? 0x01 : 0x00;
       payload[offset + 1] = timer.start.hour;
       payload[offset + 2] = timer.start.minute;
@@ -779,19 +766,45 @@ export class HMDeviceProtocol {
   }
 
   private validateTimer(timer: TimerInfo, index: number): void {
-    if (timer.start.hour < 0 || timer.start.hour > 23) {
+    if (
+      !Number.isInteger(timer.start.hour) ||
+      timer.start.hour < 0 ||
+      timer.start.hour > 23
+    ) {
       throw new Error(`Timer ${index + 1}: start hour must be 0-23`);
     }
-    if (timer.start.minute < 0 || timer.start.minute > 59) {
+    if (
+      !Number.isInteger(timer.start.minute) ||
+      timer.start.minute < 0 ||
+      timer.start.minute > 59
+    ) {
       throw new Error(`Timer ${index + 1}: start minute must be 0-59`);
     }
-    if (timer.end.hour < 0 || timer.end.hour > 23) {
-      throw new Error(`Timer ${index + 1}: end hour must be 0-23`);
+    // The device uses 24:00 to express "end of day"
+    if (
+      !Number.isInteger(timer.end.hour) ||
+      timer.end.hour < 0 ||
+      timer.end.hour > 24
+    ) {
+      throw new Error(`Timer ${index + 1}: end hour must be 0-24`);
     }
-    if (timer.end.minute < 0 || timer.end.minute > 59) {
+    if (
+      !Number.isInteger(timer.end.minute) ||
+      timer.end.minute < 0 ||
+      timer.end.minute > 59
+    ) {
       throw new Error(`Timer ${index + 1}: end minute must be 0-59`);
     }
-    if (timer.outputPower < 0 || timer.outputPower > 65535) {
+    if (timer.end.hour === 24 && timer.end.minute !== 0) {
+      throw new Error(
+        `Timer ${index + 1}: end minute must be 0 when end hour is 24`,
+      );
+    }
+    if (
+      !Number.isInteger(timer.outputPower) ||
+      timer.outputPower < 0 ||
+      timer.outputPower > 65535
+    ) {
       throw new Error(`Timer ${index + 1}: output power must be 0-65535`);
     }
   }

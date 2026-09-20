@@ -708,13 +708,19 @@ class BLEDeviceManager {
 
   /**
    * Set timer schedule entries
-   * @param timers Timer entries to write
+   *
+   * The device rewrites all of its timer slots at once, so the complete set
+   * has to be sent: 3 entries for firmware < 218, 5 entries otherwise. Read
+   * the current schedule with {@link getTimers} first and modify the entries
+   * you want to change.
+   *
+   * Note that every write is persisted to the device's flash, which only
+   * tolerates a limited number of write cycles - do not call this on a timer
+   * or in a control loop.
+   *
+   * @param timers Timer entries to write (one per device slot)
    */
   public async setTimers(timers: TimerInfo[]): Promise<void> {
-    if (!timers.length) {
-      throw new Error("At least one timer is required");
-    }
-
     const payload = this.protocol.createTimerConfigPayload(timers);
     await this.sendCommand(COMMAND_TYPES.SET_TIMERS, payload);
   }

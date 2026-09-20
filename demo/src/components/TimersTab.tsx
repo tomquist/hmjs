@@ -8,18 +8,14 @@ interface TimersTabProps {
   onSetTimers: (timers: TimerInfo[]) => Promise<void>;
 }
 
+const CSV_HEADER =
+  "enabled,start_hour,start_minute,end_hour,end_minute,output_power";
+
 const formatTime = (hour: number, minute: number): string => {
   return `${hour.toString().padStart(2, "0")}:${minute
     .toString()
     .padStart(2, "0")}`;
 };
-
-const createEmptyTimer = (): TimerInfo => ({
-  enabled: false,
-  start: { hour: 0, minute: 0 },
-  end: { hour: 0, minute: 0 },
-  outputPower: 0,
-});
 
 const TimersTab: React.FC<TimersTabProps> = ({
   timerInfo,
@@ -28,11 +24,13 @@ const TimersTab: React.FC<TimersTabProps> = ({
   onSetTimers,
 }) => {
   const [editableTimers, setEditableTimers] = React.useState<TimerInfo[]>([]);
+  const [lastUpdate, setLastUpdate] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     if (timerInfo?.timers) {
       setEditableTimers(timerInfo.timers.map((t) => ({ ...t })));
+      setLastUpdate(new Date().toLocaleTimeString());
     }
   }, [timerInfo]);
 
@@ -40,20 +38,12 @@ const TimersTab: React.FC<TimersTabProps> = ({
     index: number,
     update: (timer: TimerInfo) => TimerInfo,
   ) => {
-    setEditableTimers((prev) => prev.map((t, i) => (i === index ? update(t) : t)));
-  };
-
-  const addTimer = () => {
-    setEditableTimers((prev) => [...prev, createEmptyTimer()]);
-  };
-
-  const removeTimer = (index: number) => {
-    setEditableTimers((prev) => prev.filter((_, i) => i !== index));
+    setEditableTimers((prev) =>
+      prev.map((t, i) => (i === index ? update(t) : t)),
+    );
   };
 
   const handleExportCsv = () => {
-    const header =
-      "enabled,start_hour,start_minute,end_hour,end_minute,output_power";
     const rows = editableTimers.map((t) =>
       [
         t.enabled ? 1 : 0,
@@ -64,14 +54,17 @@ const TimersTab: React.FC<TimersTabProps> = ({
         t.outputPower,
       ].join(","),
     );
-    const csv = [header, ...rows].join("\n");
+    const csv = [CSV_HEADER, ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.download = "timers.csv";
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    link.remove();
+    // Give the browser a chance to start the download before dropping the URL
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   const handleImportCsv = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -80,6 +73,7 @@ const TimersTab: React.FC<TimersTabProps> = ({
       return;
     }
 
+    const slotCount = editableTimers.length;
     const reader = new FileReader();
     reader.onload = () => {
       const text = String(reader.result || "");
@@ -88,12 +82,14 @@ const TimersTab: React.FC<TimersTabProps> = ({
         .map((line) => line.trim())
         .filter(Boolean);
 
-      if (lines.length < 2) {
-        alert("CSV must include a header and at least one timer row.");
+      const dataLines = lines.slice(1);
+      if (dataLines.length !== slotCount) {
+        alert(
+          `CSV must contain a header and exactly ${slotCount} timer rows (one per device slot).`,
+        );
         return;
       }
 
-      const dataLines = lines.slice(1);
       const imported: TimerInfo[] = [];
 
       for (const line of dataLines) {
@@ -104,11 +100,9 @@ const TimersTab: React.FC<TimersTabProps> = ({
         }
 
         const enabled = parts[0] === "1" || parts[0].toLowerCase() === "true";
-        const startHour = Number(parts[1]);
-        const startMinute = Number(parts[2]);
-        const endHour = Number(parts[3]);
-        const endMinute = Number(parts[4]);
-        const outputPower = Number(parts[5]);
+        const [startHour, startMinute, endHour, endMinute, outputPower] = parts
+          .slice(1, 6)
+          .map(Number);
 
         if (
           [startHour, startMinute, endHour, endMinute, outputPower].some((n) =>
@@ -136,28 +130,44 @@ const TimersTab: React.FC<TimersTabProps> = ({
 
   const handleSaveTimers = async () => {
     if (!editableTimers.length) {
-      alert("Add at least one timer before saving.");
+      alert("Read the current schedule from the device before saving.");
       return;
     }
     await onSetTimers(editableTimers);
   };
 
+  const hasTimers = editableTimers.length > 0;
+
   return (
     <div id="timers-tab" className="tab-pane">
       <div id="timers-container">
         <h2>Timer Schedule</h2>
+        <p className="timers-hint">
+          The device rewrites all of its timer slots at once, so the complete
+          schedule is read first and written back as a whole. Disable a slot you
+          do not want to use instead of removing it. Every write is stored in
+          the device&apos;s flash memory, so avoid writing the schedule
+          repeatedly.
+        </p>
         <div className="button-group">
           <button onClick={onGetTimers} disabled={!isConnected}>
             Get Timers
           </button>
-          <button onClick={handleSaveTimers} disabled={!isConnected}>
+          <button
+            onClick={handleSaveTimers}
+            disabled={!isConnected || !hasTimers}
+          >
             Set Timers
           </button>
-          <button onClick={addTimer}>Add Timer</button>
-          <button onClick={handleExportCsv} disabled={!editableTimers.length}>
+          <button onClick={handleExportCsv} disabled={!hasTimers}>
             Export CSV
           </button>
-          <button onClick={() => fileInputRef.current?.click()}>Import CSV</button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!hasTimers}
+          >
+            Import CSV
+          </button>
           <input
             ref={fileInputRef}
             type="file"
@@ -167,12 +177,19 @@ const TimersTab: React.FC<TimersTabProps> = ({
           />
         </div>
 
-        {!!editableTimers.length && (
+        {!hasTimers && (
+          <p>
+            No timer schedule loaded. Press &quot;Get Timers&quot; to read the
+            current schedule from the device.
+          </p>
+        )}
+
+        {hasTimers && (
           <div className="device-info">
             <table className="info-table">
               <thead>
                 <tr>
-                  <th>#</th>
+                  <th>Slot</th>
                   <th>Enabled</th>
                   <th>Start Hour</th>
                   <th>Start Minute</th>
@@ -180,7 +197,6 @@ const TimersTab: React.FC<TimersTabProps> = ({
                   <th>End Minute</th>
                   <th>Power (W)</th>
                   <th>Preview</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -190,6 +206,7 @@ const TimersTab: React.FC<TimersTabProps> = ({
                     <td>
                       <input
                         type="checkbox"
+                        aria-label={`Timer ${index + 1} enabled`}
                         checked={timer.enabled}
                         onChange={(e) =>
                           updateTimer(index, (t) => ({
@@ -266,7 +283,7 @@ const TimersTab: React.FC<TimersTabProps> = ({
                       <input
                         type="number"
                         min={0}
-                        max={65535}
+                        max={800}
                         value={timer.outputPower}
                         onChange={(e) =>
                           updateTimer(index, (t) => ({
@@ -279,13 +296,8 @@ const TimersTab: React.FC<TimersTabProps> = ({
                     </td>
                     <td>
                       {formatTime(timer.start.hour, timer.start.minute)} -{" "}
-                      {formatTime(timer.end.hour, timer.end.minute)} @ {timer.outputPower}
-                      W
-                    </td>
-                    <td>
-                      <button type="button" onClick={() => removeTimer(index)}>
-                        Remove
-                      </button>
+                      {formatTime(timer.end.hour, timer.end.minute)} @{" "}
+                      {timer.outputPower}W
                     </td>
                   </tr>
                 ))}
@@ -293,10 +305,17 @@ const TimersTab: React.FC<TimersTabProps> = ({
             </table>
 
             <div className="status-line">
-              <span>Entries: </span>
+              <span>Slots: </span>
               <span>{editableTimers.length}</span>
+              {timerInfo && (
+                <span>
+                  {" "}
+                  | Adaptive mode:{" "}
+                  {timerInfo.adaptiveModeEnabled ? "on" : "off"}
+                </span>
+              )}
               <span className="last-update">
-                Last Updated: <span>{new Date().toLocaleTimeString()}</span>
+                Last Updated: <span>{lastUpdate ?? "-"}</span>
               </span>
             </div>
           </div>

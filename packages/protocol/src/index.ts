@@ -13,6 +13,9 @@ export {
   COMMAND_TYPES,
   START_BYTE,
   IDENTIFIER_BYTE,
+  TIMER_ENTRY_SIZE,
+  BASE_TIMER_SLOT_COUNT,
+  EXTENDED_TIMER_SLOT_COUNT,
 } from "./HMDeviceProtocol.js";
 
 // Export types
@@ -22,6 +25,7 @@ export type {
   CellInfo,
   TimerInfo,
   TimerInfoResponse,
+  SmartMeterInfo,
   WifiMqttState,
   MQTTConfig,
 } from "./types.js";

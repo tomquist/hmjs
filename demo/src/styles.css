@@ -410,6 +410,13 @@ button#clear-logs-button:hover {
   border-radius: 4px;
 }
 
+.timers-hint {
+  margin: 0 0 15px;
+  color: #5a6570;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .container {

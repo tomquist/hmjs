@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import typescript from '@typescript-eslint/eslint-plugin';
 import typescriptParser from '@typescript-eslint/parser';
+import prettier from 'eslint-plugin-prettier';
 import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
@@ -27,10 +28,11 @@ export default [
     },
     plugins: {
       '@typescript-eslint': typescript,
+      prettier,
     },
     rules: {
       ...typescript.configs.recommended.rules,
-      'linebreak-style': ['error', 'unix'],
+      'prettier/prettier': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'off', // Allow any types - can be re-enabled later
     },

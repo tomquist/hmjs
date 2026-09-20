@@ -58,6 +58,7 @@ Open your browser to the provided URL and use the demo interface to:
 - Scan and connect to HM devices
 - View device information and real-time data
 - Monitor cell voltages and temperatures
+- Read and edit the manual-mode timer schedule
 - Configure device settings
 
 ### Using the Library
@@ -76,6 +77,31 @@ manager.on('runtimeInfo', (data) => {
   console.log('Power:', data.in1Power + data.in2Power);
 });
 ```
+
+#### Timer schedule
+
+The device stores a fixed number of manual-mode timer slots (3 on firmware
+< 218, 5 otherwise) and rewrites all of them from a single command. Read the
+current schedule first, change the slots you care about and write the complete
+set back:
+
+```typescript
+const schedule = await manager.getTimers();
+
+const timers = schedule.timers.map((timer) => ({ ...timer }));
+timers[0] = {
+  enabled: true,
+  start: { hour: 8, minute: 0 },
+  end: { hour: 17, minute: 0 },
+  outputPower: 500,
+};
+
+await manager.setTimers(timers);
+```
+
+> **Note:** every `setTimers` call is persisted to the device's flash memory,
+> which only tolerates a limited number of write cycles. Do not use the timers
+> to build a zero feed-in automation.
 
 ## Development
 

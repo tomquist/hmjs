@@ -45,13 +45,27 @@ export interface TimerInfo {
   };
   /** End time */
   end: {
-    /** Hour (0-23) */
+    /** Hour (0-23; the device's end of day is 23:59) */
     hour: number;
     /** Minute (0-59) */
     minute: number;
   };
   /** Output power in watts (uint16, little-endian) */
   outputPower: number;
+}
+
+/**
+ * Smart meter state reported alongside the timer schedule
+ */
+export interface SmartMeterInfo {
+  /** Whether a smart meter is paired with the device */
+  connected: boolean;
+  /** Power currently exported to the grid in watts (uint16, little-endian) */
+  powerOut: number;
+  /** Signed meter reading in watts (int16, little-endian) */
+  meterReading: number;
+  /** Unknown trailing field (uint16, little-endian) */
+  unknown: number;
 }
 
 /**
@@ -68,12 +82,15 @@ export interface TimerInfoResponse {
   command: number;
   /** Raw payload bytes (message body excluding header/checksum) */
   rawPayload: Uint8Array;
-  /** Parsed timer entries found in payload */
+  /** Whether the device runs in adaptive (smart meter) mode */
+  adaptiveModeEnabled: boolean;
+  /**
+   * Timer entries, one per device slot. Contains 3 entries for firmware < 218
+   * and 5 entries otherwise, or none if the payload was too short to parse.
+   */
   timers: TimerInfo[];
-  /** Byte offset in payload where timer entries begin */
-  timerDataOffset: number;
-  /** Any bytes after timer entries (if present) */
-  trailingData: Uint8Array;
+  /** Smart meter state, or null if the payload was too short to parse */
+  smartMeter: SmartMeterInfo | null;
 }
 
 /**

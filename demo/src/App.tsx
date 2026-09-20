@@ -247,7 +247,9 @@ const App: React.FC = () => {
     });
 
     deviceManager.on("timerInfo", (info: TimerInfoResponse) => {
-      logFunction(`Received timer schedule: ${info.timers.length} timer entries`);
+      logFunction(
+        `Received timer schedule: ${info.timers.length} timer entries`,
+      );
       setTimerInfo(info);
     });
 
@@ -533,7 +535,7 @@ const App: React.FC = () => {
     }
   };
 
-  // Set WiFi config
+  // Read the timer schedule from the device
   const getTimerSchedule = async () => {
     try {
       if (deviceManagerRef.current) {
@@ -575,13 +577,20 @@ const App: React.FC = () => {
     }
   };
 
+  // Write the complete timer schedule back to the device
   const setTimerSchedule = async (timers: TimerInfo[]) => {
     if (!timers.length) {
-      alert("At least one timer is required");
+      alert("Read the current schedule from the device first");
       return;
     }
 
-    if (!confirm(`Set ${timers.length} timer entries on device?`)) {
+    if (
+      !confirm(
+        `Overwrite all ${timers.length} timer slots on the device?\n\n` +
+          "The schedule is stored in the device's flash memory, so avoid " +
+          "writing it repeatedly.",
+      )
+    ) {
       return;
     }
 

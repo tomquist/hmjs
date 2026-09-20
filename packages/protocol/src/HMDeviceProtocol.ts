@@ -129,7 +129,54 @@ export const COMMANDS = {
   SET_WIFI: 0x05,
   SET_MQTT: 0x20,
   RESET_MQTT: 0x21,
+  GET_WIFI_INFO: 0x08,
+  SET_DOD: 0x0b,
+  SET_DISCHARGE_THRESHOLD: 0x0c,
+  SET_CHARGE_MODE: 0x0d,
+  SET_OUTPUT_CHANNELS: 0x0e,
+  SET_ADAPTIVE_MODE: 0x11,
+  SET_DATETIME: 0x14,
+  RESTART_DEVICE: 0x25,
+  RUN_DIAGNOSIS: 0x2a,
+  GET_ERROR_INFO: 0x30,
 } as const;
+
+/** Charge modes accepted by {@link COMMANDS.SET_CHARGE_MODE} */
+export const CHARGE_MODE = {
+  /** Charge the battery to half capacity */
+  HALF: 0x00,
+  /** Charge the battery to full capacity */
+  FULL: 0x01,
+} as const;
+
+/**
+ * Output channel bits for {@link COMMANDS.SET_OUTPUT_CHANNELS}
+ *
+ * The payload is a bitmask, so the two can be combined to enable both.
+ */
+export const OUTPUT_CHANNEL = {
+  OUT1: 0x01,
+  OUT2: 0x02,
+} as const;
+
+/**
+ * Diagnosis variants accepted by {@link COMMANDS.RUN_DIAGNOSIS}
+ *
+ * The app picks between them by firmware: older builds send `LEGACY`, newer
+ * ones send `CURRENT`.
+ */
+export const DIAGNOSIS_VARIANT = {
+  LEGACY: 0x01,
+  CURRENT: 0xff,
+} as const;
+
+/**
+ * Year the {@link COMMANDS.SET_DATETIME} payload counts from.
+ *
+ * The device uses the C `struct tm` convention: the year byte is the year
+ * minus 1900 and the month byte is zero-based.
+ */
+export const DATETIME_YEAR_EPOCH = 1900;
 
 /** Size of a single timer entry in bytes */
 export const TIMER_ENTRY_SIZE = 7;
@@ -761,6 +808,109 @@ export class HMDeviceProtocol {
         `${label} must not contain ${illegal.map((char) => `\`${char}\``).join(" or ")}. ` +
           `The device cannot store these characters and will fail to connect.`,
       );
+    }
+  }
+
+  /**
+   * Create a depth-of-discharge command payload
+   * @param percent Depth of discharge, 0-100
+   * @returns Payload bytes
+   */
+  public createDodPayload(percent: number): Uint8Array {
+    this.validateByteRange(percent, 0, 100, "Depth of discharge");
+    return new Uint8Array([percent]);
+  }
+
+  /**
+   * Create a discharge threshold command payload
+   * @param watts Threshold in watts, sent little-endian
+   * @returns Payload bytes
+   */
+  public createDischargeThresholdPayload(watts: number): Uint8Array {
+    this.validateByteRange(watts, 0, 0xffff, "Discharge threshold");
+    return new Uint8Array([watts & 0xff, (watts >> 8) & 0xff]);
+  }
+
+  /**
+   * Create a charge mode command payload
+   * @param mode Value from {@link CHARGE_MODE}
+   * @returns Payload bytes
+   */
+  public createChargeModePayload(mode: number): Uint8Array {
+    if (mode !== CHARGE_MODE.HALF && mode !== CHARGE_MODE.FULL) {
+      throw new Error(
+        "Charge mode must be CHARGE_MODE.HALF or CHARGE_MODE.FULL",
+      );
+    }
+    return new Uint8Array([mode]);
+  }
+
+  /**
+   * Create an output channel command payload
+   * @param mask Bitmask of {@link OUTPUT_CHANNEL} values (0-3)
+   * @returns Payload bytes
+   */
+  public createOutputChannelsPayload(mask: number): Uint8Array {
+    this.validateByteRange(
+      mask,
+      0,
+      OUTPUT_CHANNEL.OUT1 | OUTPUT_CHANNEL.OUT2,
+      "Output channel mask",
+    );
+    return new Uint8Array([mask]);
+  }
+
+  /**
+   * Create a date/time command payload
+   *
+   * The device uses the C `struct tm` convention, so the year is offset by
+   * {@link DATETIME_YEAR_EPOCH} and the month is zero-based. Two trailing
+   * zero bytes follow the six date fields.
+   *
+   * @param date Date to write; defaults to now
+   * @returns Payload bytes
+   */
+  public createDateTimePayload(date: Date = new Date()): Uint8Array {
+    // An invalid Date returns NaN from every accessor, which passes the range
+    // check below and then encodes as zero, so reject it up front.
+    if (Number.isNaN(date.getTime())) {
+      throw new Error("Date must be a valid Date");
+    }
+
+    const year = date.getFullYear() - DATETIME_YEAR_EPOCH;
+    if (year < 0 || year > 255) {
+      throw new Error(
+        `Year must be between ${DATETIME_YEAR_EPOCH} and ${DATETIME_YEAR_EPOCH + 255}`,
+      );
+    }
+    return new Uint8Array([
+      year,
+      date.getMonth(),
+      date.getDate(),
+      date.getHours(),
+      date.getMinutes(),
+      date.getSeconds(),
+      0,
+      0,
+    ]);
+  }
+
+  /**
+   * Reject a value that does not fit the device's expected range
+   * @param value Value to check
+   * @param min Lowest accepted value
+   * @param max Highest accepted value
+   * @param label Field name used in the error message
+   * @private
+   */
+  private validateByteRange(
+    value: number,
+    min: number,
+    max: number,
+    label: string,
+  ): void {
+    if (!Number.isInteger(value) || value < min || value > max) {
+      throw new Error(`${label} must be an integer between ${min} and ${max}`);
     }
   }
 

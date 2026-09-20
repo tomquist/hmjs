@@ -6,7 +6,7 @@ const NetworkCommands: React.FC = () => {
     <CommandCategory title="Network Status" icon="📡">
       <SimpleCommand
         commandCode="8 or 0x08"
-        description="WiFi State (FW >133)"
+        description="Read WiFi Info (FW >133) - returns the SSID the device has stored"
       />
     </CommandCategory>
   );

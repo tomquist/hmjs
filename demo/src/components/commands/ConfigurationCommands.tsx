@@ -31,7 +31,7 @@ const ConfigurationCommands: React.FC = () => {
             </li>
           </ul>
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>73 05 23 02 00 56</code> (Set to EU
+            <strong>Example:</strong> <code>73 06 23 02 00 54</code> (Set to EU
             region)
           </PayloadExampleCommand>
         </PayloadDetails>
@@ -103,7 +103,7 @@ const ConfigurationCommands: React.FC = () => {
           <PayloadFormat format="[DOD_PERCENTAGE]" />
           <p>Value range: 0-100 (percentage)</p>
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>73 05 23 0B 50 XX</code> (Set DOD to
+            <strong>Example:</strong> <code>73 06 23 0B 50 0D</code> (Set DOD to
             80%)
           </PayloadExampleCommand>
         </PayloadDetails>
@@ -120,7 +120,7 @@ const ConfigurationCommands: React.FC = () => {
           <PayloadFormat format="[LOW_BYTE] [HIGH_BYTE]" />
           <p>Threshold value in watts (little-endian)</p>
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>73 06 23 0C E8 03 XX</code> (Set to
+            <strong>Example:</strong> <code>73 07 23 0C E8 03 B0</code> (Set to
             1000W)
           </PayloadExampleCommand>
         </PayloadDetails>
@@ -129,17 +129,18 @@ const ConfigurationCommands: React.FC = () => {
       <PayloadCommand commandCode="20 or 0x14" commandName="Set Date/Time">
         <PayloadDetails>
           <p>
-            <strong>Payload:</strong> DateTimePacket structure (6 bytes)
+            <strong>Payload:</strong> DateTimePacket structure (8 bytes)
           </p>
-          <PayloadFormat format="[YEAR] [MONTH] [DAY] [HOUR] [MINUTE] [SECOND]" />
+          <PayloadFormat format="[YEAR] [MONTH] [DAY] [HOUR] [MINUTE] [SECOND] [00] [00]" />
 
           <StructureInfo title="DateTimePacket Structure:">
             <ul>
               <li>
-                <strong>Byte 0 (year):</strong> Years since 2000 (0-255)
+                <strong>Byte 0 (year):</strong> Years since 1900 (0-255), the C{" "}
+                <code>struct tm</code> convention
               </li>
               <li>
-                <strong>Byte 1 (month):</strong> Month (1-12)
+                <strong>Byte 1 (month):</strong> Month, zero-based (0-11)
               </li>
               <li>
                 <strong>Byte 2 (day):</strong> Day of month (1-31)
@@ -153,13 +154,18 @@ const ConfigurationCommands: React.FC = () => {
               <li>
                 <strong>Byte 5 (second):</strong> Second (0-59)
               </li>
+              <li>
+                <strong>Bytes 6-7:</strong> reserved, sent as zero
+              </li>
             </ul>
           </StructureInfo>
 
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>18 0C 0F 0E 1E 00</code>
+            <strong>Example:</strong> <code>7C 0B 0F 0E 1E 2D 00 00</code>
             <br />
-            <small>Dec 15, 2024 (24 years since 2000), 14:30:00</small>
+            <small>
+              Dec 15, 2024 (124 years since 1900, month 11), 14:30:45
+            </small>
           </PayloadExampleCommand>
         </PayloadDetails>
       </PayloadCommand>

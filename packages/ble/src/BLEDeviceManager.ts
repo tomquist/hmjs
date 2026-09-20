@@ -11,6 +11,7 @@ import {
   TimerInfoResponse,
   MQTTConfig,
   HMDeviceProtocol,
+  DIAGNOSIS_VARIANT,
 } from "@tomquist/hmjs-protocol";
 import {
   BLEManagerOptions,
@@ -740,6 +741,127 @@ class BLEDeviceManager {
     const configBytes = this.protocol.createWifiConfigPayload(ssid, password);
 
     await this.sendCommand(COMMAND_TYPES.SET_WIFI, configBytes);
+  }
+
+  /**
+   * Request the WiFi information the device currently has stored
+   *
+   * Useful after {@link setWifiConfig} to confirm what the device actually
+   * kept. The response is delivered through the `rawData` event - this
+   * library does not yet parse it.
+   */
+  public async getWifiInfo(): Promise<void> {
+    await this.sendCommand(COMMAND_TYPES.GET_WIFI_INFO, [0x01]);
+  }
+
+  /**
+   * Request the device's stored error/fault information
+   *
+   * The response is delivered through the `rawData` event - this library
+   * does not yet parse it.
+   */
+  public async getErrorInfo(): Promise<void> {
+    await this.sendCommand(COMMAND_TYPES.GET_ERROR_INFO, [0x01]);
+  }
+
+  /**
+   * Set the depth of discharge
+   *
+   * This is persisted to the device's flash, so do not call it on a timer or
+   * in a control loop.
+   *
+   * @param percent Depth of discharge, 0-100
+   */
+  public async setDod(percent: number): Promise<void> {
+    const payload = this.protocol.createDodPayload(percent);
+    await this.sendCommand(COMMAND_TYPES.SET_DOD, payload);
+  }
+
+  /**
+   * Set the discharge threshold
+   *
+   * This is persisted to the device's flash, so do not call it on a timer or
+   * in a control loop.
+   *
+   * @param watts Threshold in watts (0-65535)
+   */
+  public async setDischargeThreshold(watts: number): Promise<void> {
+    const payload = this.protocol.createDischargeThresholdPayload(watts);
+    await this.sendCommand(COMMAND_TYPES.SET_DISCHARGE_THRESHOLD, payload);
+  }
+
+  /**
+   * Set the charge mode
+   * @param mode Value from `CHARGE_MODE`
+   */
+  public async setChargeMode(mode: number): Promise<void> {
+    const payload = this.protocol.createChargeModePayload(mode);
+    await this.sendCommand(COMMAND_TYPES.SET_CHARGE_MODE, payload);
+  }
+
+  /**
+   * Enable or disable the two output channels
+   * @param mask Bitmask of `OUTPUT_CHANNEL` values (0-3)
+   */
+  public async setOutputChannels(mask: number): Promise<void> {
+    const payload = this.protocol.createOutputChannelsPayload(mask);
+    await this.sendCommand(COMMAND_TYPES.SET_OUTPUT_CHANNELS, payload);
+  }
+
+  /**
+   * Enable or disable adaptive mode
+   * @param enabled Whether adaptive mode should be on
+   */
+  public async setAdaptiveMode(enabled: boolean): Promise<void> {
+    await this.sendCommand(COMMAND_TYPES.SET_ADAPTIVE_MODE, [
+      enabled ? 0x01 : 0x00,
+    ]);
+  }
+
+  /**
+   * Write the device's clock
+   *
+   * This is persisted to the device's flash, so do not call it on a timer or
+   * in a control loop.
+   *
+   * @param date Date to write; defaults to now
+   */
+  public async setDateTime(date?: Date): Promise<void> {
+    const payload = this.protocol.createDateTimePayload(date);
+    await this.sendCommand(COMMAND_TYPES.SET_DATETIME, payload);
+  }
+
+  /**
+   * Restart the device
+   *
+   * The device drops the BLE connection while it reboots.
+   */
+  public async restartDevice(): Promise<void> {
+    // sendCommand repeats every frame by default. The device can drop the BLE
+    // link as soon as it acts on the first restart frame, which would make the
+    // second write fail and report a successful restart as an error.
+    await this.sendCommand(COMMAND_TYPES.RESTART_DEVICE, [0x01], {
+      sendTwice: false,
+    });
+  }
+
+  /**
+   * Ask the device to re-run its CT diagnosis
+   * @param variant Value from `DIAGNOSIS_VARIANT`; newer firmware uses
+   *   `CURRENT`, older firmware `LEGACY`
+   */
+  public async runDiagnosis(
+    variant: number = DIAGNOSIS_VARIANT.CURRENT,
+  ): Promise<void> {
+    if (
+      variant !== DIAGNOSIS_VARIANT.LEGACY &&
+      variant !== DIAGNOSIS_VARIANT.CURRENT
+    ) {
+      throw new Error(
+        "Diagnosis variant must be DIAGNOSIS_VARIANT.LEGACY or DIAGNOSIS_VARIANT.CURRENT",
+      );
+    }
+    await this.sendCommand(COMMAND_TYPES.RUN_DIAGNOSIS, [variant]);
   }
 
   /**

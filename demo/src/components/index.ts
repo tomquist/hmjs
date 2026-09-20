@@ -6,6 +6,7 @@ export { default as RuntimeTab } from "./RuntimeTab.js";
 export { default as CellInfoTab } from "./CellInfoTab.js";
 export { default as TimersTab } from "./TimersTab.js";
 export { default as ConfigurationTab } from "./ConfigurationTab.js";
+export { default as DeviceControlTab } from "./DeviceControlTab.js";
 export { default as LogsTab } from "./LogsTab.js";
 export { default as AdvancedTab } from "./AdvancedTab.js";
 export { default as ProtocolInfo } from "./ProtocolInfo.js";

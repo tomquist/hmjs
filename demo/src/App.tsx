@@ -10,6 +10,7 @@ import {
   HMDeviceProtocol,
   WIFI_ILLEGAL_CHARACTERS,
   WIFI_PASSWORD_MIN_LENGTH,
+  CHARGE_MODE,
 } from "@tomquist/hmjs-protocol";
 import {
   DisclaimerModal,
@@ -20,6 +21,7 @@ import {
   CellInfoTab,
   TimersTab,
   ConfigurationTab,
+  DeviceControlTab,
   AdvancedTab,
 } from "./components";
 import { isIOS, isBluetoothSupported } from "./utils/platform.js";
@@ -31,6 +33,7 @@ enum TabType {
   CellInfo = "cell-tab",
   Timers = "timers-tab",
   Configuration = "config-tab",
+  DeviceControl = "device-control-tab",
   Advanced = "advanced-tab",
 }
 
@@ -810,6 +813,116 @@ const App: React.FC = () => {
   };
 
   // Reset MQTT config
+  /**
+   * Run a command against the connected device, reconnecting first if our
+   * connection state has drifted, and reporting failures the same way the
+   * other handlers do.
+   */
+  const runDeviceCommand = async (
+    label: string,
+    run: (deviceManager: BLEDeviceManager) => Promise<void>,
+    successMessage?: string,
+  ) => {
+    try {
+      const deviceManager = deviceManagerRef.current;
+      if (!deviceManager) return;
+
+      // BLEDeviceManager keeps the device in a private `device` field, so the
+      // app's own selectedDevice is what we can reconnect from.
+      if (!deviceManager.isConnected() && isConnected && selectedDevice) {
+        addLog("Connection state mismatch - attempting to reconnect...");
+        const savedDevice = selectedDevice.device;
+        try {
+          await deviceManager.connect(savedDevice);
+          addLog("Reconnection successful");
+        } catch (reconnectError) {
+          addLog(
+            `Reconnection failed: ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`,
+          );
+          setIsConnected(false);
+          throw new Error("Failed to reconnect to device");
+        }
+      }
+
+      addLog(`Sending ${label} command...`);
+      await run(deviceManager);
+      addLog(`${label} sent successfully`);
+      if (successMessage) alert(successMessage);
+      setIsConnected(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      addLog(`Error sending ${label}: ${message}`);
+      alert(`Failed to send ${label}: ${message}`);
+    }
+  };
+
+  const setDod = async (percent: number) =>
+    runDeviceCommand(
+      "set DOD",
+      (dm) => dm.setDod(percent),
+      `Depth of discharge set to ${percent}%`,
+    );
+
+  const setDischargeThreshold = async (watts: number) =>
+    runDeviceCommand(
+      "set discharge threshold",
+      (dm) => dm.setDischargeThreshold(watts),
+      `Discharge threshold set to ${watts}W`,
+    );
+
+  const setChargeMode = async (mode: number) =>
+    runDeviceCommand(
+      "set charge mode",
+      (dm) => dm.setChargeMode(mode),
+      `Charge mode set to ${mode === CHARGE_MODE.FULL ? "full" : "half"}`,
+    );
+
+  const setOutputChannels = async (mask: number) =>
+    runDeviceCommand(
+      "set output channels",
+      (dm) => dm.setOutputChannels(mask),
+      "Output channels updated",
+    );
+
+  const setAdaptiveMode = async (enabled: boolean) =>
+    runDeviceCommand(
+      "set adaptive mode",
+      (dm) => dm.setAdaptiveMode(enabled),
+      `Adaptive mode ${enabled ? "enabled" : "disabled"}`,
+    );
+
+  const setDeviceDateTime = async () => {
+    const now = new Date();
+    if (!confirm(`Set the device clock to ${now.toLocaleString()}?`)) return;
+    return runDeviceCommand(
+      "set date/time",
+      (dm) => dm.setDateTime(now),
+      "Device clock updated",
+    );
+  };
+
+  const restartDevice = async () => {
+    if (
+      !confirm(
+        "Restart the device? The Bluetooth connection will drop until it comes back up.",
+      )
+    ) {
+      return;
+    }
+    return runDeviceCommand("restart device", (dm) => dm.restartDevice());
+  };
+
+  const runDiagnosis = async () => {
+    if (!confirm("Ask the device to re-run its CT diagnosis?")) return;
+    return runDeviceCommand("run diagnosis", (dm) => dm.runDiagnosis());
+  };
+
+  const getWifiInfo = async () =>
+    runDeviceCommand("read WiFi info", (dm) => dm.getWifiInfo());
+
+  const getErrorInfo = async () =>
+    runDeviceCommand("read error info", (dm) => dm.getErrorInfo());
+
   const resetMqttConfig = async () => {
     // Confirm before sending
     if (!confirm("Are you sure you want to reset the MQTT configuration?")) {
@@ -1029,6 +1142,12 @@ const App: React.FC = () => {
           Configuration
         </button>
         <button
+          className={`tab-button ${activeTab === TabType.DeviceControl ? "active" : ""}`}
+          onClick={() => setActiveTab(TabType.DeviceControl)}
+        >
+          Device Control
+        </button>
+        <button
           className={`tab-button ${activeTab === TabType.Advanced ? "active" : ""}`}
           onClick={() => setActiveTab(TabType.Advanced)}
         >
@@ -1078,6 +1197,23 @@ const App: React.FC = () => {
             onSetWifiConfig={setWifiConfig}
             onSetMqttConfig={setMqttConfig}
             onResetMqttConfig={resetMqttConfig}
+          />
+        )}
+
+        {activeTab === TabType.DeviceControl && (
+          <DeviceControlTab
+            isConnected={isConnected}
+            onSetDod={setDod}
+            onSetDischargeThreshold={setDischargeThreshold}
+            onSetChargeMode={setChargeMode}
+            onSetOutputChannels={setOutputChannels}
+            onSetAdaptiveMode={setAdaptiveMode}
+            onSetDateTime={setDeviceDateTime}
+            onRestartDevice={restartDevice}
+            onRunDiagnosis={runDiagnosis}
+            onGetWifiInfo={getWifiInfo}
+            onGetErrorInfo={getErrorInfo}
+            rawResponses={rawResponses}
           />
         )}
 

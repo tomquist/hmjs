@@ -20,6 +20,10 @@ const StatusCommands: React.FC = () => {
         commandCode="35 or 0x23"
         description="FC41D Info (Firmware)"
       />
+      <SimpleCommand
+        commandCode="48 or 0x30"
+        description="Error Info (fault codes)"
+      />
 
       <PayloadCommand commandCode="19 or 0x13" commandName="Get Timers">
         <PayloadDetails>
@@ -29,7 +33,7 @@ const StatusCommands: React.FC = () => {
           <PayloadFormat format="[0x00]" />
           <p>Uses encode_simple_command with 0x00 byte</p>
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>73 05 23 13 00 XX</code> (Get
+            <strong>Example:</strong> <code>73 06 23 13 00 45</code> (Get
             timers)
           </PayloadExampleCommand>
         </PayloadDetails>

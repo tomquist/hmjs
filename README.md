@@ -2,6 +2,8 @@
 
 A TypeScript library for communicating with Hame battery devices via Bluetooth Low Energy (BLE). Primary support for the B2500 model.
 
+**👉 [Try the live demo](https://tomquist.github.io/hmjs/)** — connect to your B2500 straight from the browser, no install or account needed (requires a Web Bluetooth capable browser).
+
 <!-- marstek-family:start -->
 **🔋 The Marstek ecosystem.** This repo is part of a family of open-source tools for Marstek batteries (B2500, Venus, Jupiter, …):
 
@@ -49,6 +51,10 @@ npm install
 ```
 
 ### Running the Demo
+
+The demo is deployed to GitHub Pages at **<https://tomquist.github.io/hmjs/>** — open it in Chrome, Edge or Opera to use it without building anything.
+
+To run it locally:
 
 ```bash
 npm start

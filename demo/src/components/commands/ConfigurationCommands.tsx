@@ -47,7 +47,8 @@ const ConfigurationCommands: React.FC = () => {
           <p>
             Neither value may contain <code>,</code>, <code>&quot;</code> or{" "}
             <code>\</code>: the device stores those characters incorrectly and
-            then fails to join the network.
+            then fails to join the network. The password must be at least 8
+            characters.
           </p>
           <PayloadExampleCommand>
             <strong>Example:</strong>{" "}

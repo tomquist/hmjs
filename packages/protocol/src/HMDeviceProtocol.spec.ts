@@ -400,8 +400,25 @@ describe("HMDeviceProtocol", () => {
 
     it("should list every illegal character found", () => {
       expect(() =>
-        protocol.createWifiConfigPayload("TestSSID", 'a,b"c'),
+        protocol.createWifiConfigPayload("TestSSID", 'aaaa,bbbb"cccc'),
       ).toThrow('Password must not contain `,` or `"`');
+    });
+
+    it("should reject a password shorter than the WPA minimum", () => {
+      expect(() =>
+        protocol.createWifiConfigPayload("TestSSID", "short12"),
+      ).toThrow("Password must be at least 8 characters.");
+    });
+
+    it("should accept a password of exactly the minimum length", () => {
+      const password = "12345678";
+      const payload = protocol.createWifiConfigPayload("TestSSID", password);
+      expect(protocol.bytesToString(payload)).toBe(`TestSSID<.,.>${password}`);
+    });
+
+    it("should not impose a length limit on the SSID", () => {
+      const payload = protocol.createWifiConfigPayload("A", "TestPassword");
+      expect(protocol.bytesToString(payload)).toBe("A<.,.>TestPassword");
     });
 
     it("should accept other special characters", () => {

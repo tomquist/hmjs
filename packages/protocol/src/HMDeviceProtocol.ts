@@ -151,6 +151,14 @@ export const EXTENDED_TIMER_SLOT_COUNT = 5;
  */
 export const WIFI_ILLEGAL_CHARACTERS = [",", '"', "\\"] as const;
 
+/**
+ * Shortest WiFi password the device accepts.
+ *
+ * This is the WPA minimum, and the official app enforces it too. Note that
+ * it rules out WEP keys, which may be shorter.
+ */
+export const WIFI_PASSWORD_MIN_LENGTH = 8;
+
 // Payload offsets of the timer slots within a 0x13 response
 const TIMER_SLOT_OFFSETS = [1, 8, 15, 39, 46] as const;
 const SMART_METER_OFFSET = 22;
@@ -712,7 +720,8 @@ export class HMDeviceProtocol {
    * @param password WiFi password
    * @returns Payload bytes
    * @throws If either value contains a character from
-   *   {@link WIFI_ILLEGAL_CHARACTERS}, which the device cannot store
+   *   {@link WIFI_ILLEGAL_CHARACTERS}, which the device cannot store, or if
+   *   the password is shorter than {@link WIFI_PASSWORD_MIN_LENGTH}
    */
   public createWifiConfigPayload(ssid: string, password: string): Uint8Array {
     if (!ssid || !password) {
@@ -721,6 +730,12 @@ export class HMDeviceProtocol {
 
     this.validateWifiCredential(ssid, "SSID");
     this.validateWifiCredential(password, "Password");
+
+    if (password.length < WIFI_PASSWORD_MIN_LENGTH) {
+      throw new Error(
+        `Password must be at least ${WIFI_PASSWORD_MIN_LENGTH} characters.`,
+      );
+    }
 
     // Create WiFi config string with <.,.> separator
     const configStr = `${ssid}<.,.>${password}`;

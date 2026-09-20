@@ -17,6 +17,7 @@ export {
   BASE_TIMER_SLOT_COUNT,
   EXTENDED_TIMER_SLOT_COUNT,
   WIFI_ILLEGAL_CHARACTERS,
+  WIFI_PASSWORD_MIN_LENGTH,
 } from "./HMDeviceProtocol.js";
 
 // Export types

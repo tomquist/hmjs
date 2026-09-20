@@ -9,6 +9,7 @@ import {
   MQTTConfig,
   HMDeviceProtocol,
   WIFI_ILLEGAL_CHARACTERS,
+  WIFI_PASSWORD_MIN_LENGTH,
 } from "@tomquist/hmjs-protocol";
 import {
   DisclaimerModal,
@@ -671,6 +672,13 @@ const App: React.FC = () => {
           .join("\n")}\n\n` +
           `The device cannot store these characters and will fail to connect. ` +
           `Change your WiFi credentials to avoid them.`,
+      );
+      return;
+    }
+
+    if (password.length < WIFI_PASSWORD_MIN_LENGTH) {
+      alert(
+        `Password must be at least ${WIFI_PASSWORD_MIN_LENGTH} characters.`,
       );
       return;
     }

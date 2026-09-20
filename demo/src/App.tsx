@@ -412,13 +412,9 @@ const App: React.FC = () => {
         );
 
         // If device is not connected according to device manager but our state says it is, try to reconnect
-        if (
-          !deviceManager.isConnected() &&
-          isConnected &&
-          (deviceManager as any)._selectedDevice
-        ) {
+        if (!deviceManager.isConnected() && isConnected && selectedDevice) {
           addLog("Connection state mismatch - attempting to reconnect...");
-          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          const savedDevice = selectedDevice.device;
           try {
             await deviceManager.connect(savedDevice);
             addLog("Reconnection successful");
@@ -458,13 +454,9 @@ const App: React.FC = () => {
         );
 
         // If device is not connected according to device manager but our state says it is, try to reconnect
-        if (
-          !deviceManager.isConnected() &&
-          isConnected &&
-          (deviceManager as any)._selectedDevice
-        ) {
+        if (!deviceManager.isConnected() && isConnected && selectedDevice) {
           addLog("Connection state mismatch - attempting to reconnect...");
-          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          const savedDevice = selectedDevice.device;
           try {
             await deviceManager.connect(savedDevice);
             addLog("Reconnection successful");
@@ -505,13 +497,9 @@ const App: React.FC = () => {
         );
 
         // If device is not connected according to device manager but our state says it is, try to reconnect
-        if (
-          !deviceManager.isConnected() &&
-          isConnected &&
-          (deviceManager as any)._selectedDevice
-        ) {
+        if (!deviceManager.isConnected() && isConnected && selectedDevice) {
           addLog("Connection state mismatch - attempting to reconnect...");
-          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          const savedDevice = selectedDevice.device;
           try {
             await deviceManager.connect(savedDevice);
             addLog("Reconnection successful");
@@ -550,13 +538,9 @@ const App: React.FC = () => {
           `Connection state before getTimers: isConnected=${deviceManager.isConnected()}`,
         );
 
-        if (
-          !deviceManager.isConnected() &&
-          isConnected &&
-          (deviceManager as any)._selectedDevice
-        ) {
+        if (!deviceManager.isConnected() && isConnected && selectedDevice) {
           addLog("Connection state mismatch - attempting to reconnect...");
-          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          const savedDevice = selectedDevice.device;
           try {
             await deviceManager.connect(savedDevice);
             addLog("Reconnection successful");
@@ -607,13 +591,9 @@ const App: React.FC = () => {
           `Connection state before setTimers: isConnected=${deviceManager.isConnected()}`,
         );
 
-        if (
-          !deviceManager.isConnected() &&
-          isConnected &&
-          (deviceManager as any)._selectedDevice
-        ) {
+        if (!deviceManager.isConnected() && isConnected && selectedDevice) {
           addLog("Connection state mismatch - attempting to reconnect...");
-          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          const savedDevice = selectedDevice.device;
           try {
             await deviceManager.connect(savedDevice);
             addLog("Reconnection successful");
@@ -705,13 +685,9 @@ const App: React.FC = () => {
         );
 
         // If device is not connected according to device manager but our state says it is, try to reconnect
-        if (
-          !deviceManager.isConnected() &&
-          isConnected &&
-          (deviceManager as any)._selectedDevice
-        ) {
+        if (!deviceManager.isConnected() && isConnected && selectedDevice) {
           addLog("Connection state mismatch - attempting to reconnect...");
-          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          const savedDevice = selectedDevice.device;
           try {
             await deviceManager.connect(savedDevice);
             addLog("Reconnection successful");
@@ -774,13 +750,9 @@ const App: React.FC = () => {
         );
 
         // If device is not connected according to device manager but our state says it is, try to reconnect
-        if (
-          !deviceManager.isConnected() &&
-          isConnected &&
-          (deviceManager as any)._selectedDevice
-        ) {
+        if (!deviceManager.isConnected() && isConnected && selectedDevice) {
           addLog("Connection state mismatch - attempting to reconnect...");
-          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          const savedDevice = selectedDevice.device;
           try {
             await deviceManager.connect(savedDevice);
             addLog("Reconnection successful");
@@ -939,13 +911,9 @@ const App: React.FC = () => {
         );
 
         // If device is not connected according to device manager but our state says it is, try to reconnect
-        if (
-          !deviceManager.isConnected() &&
-          isConnected &&
-          (deviceManager as any)._selectedDevice
-        ) {
+        if (!deviceManager.isConnected() && isConnected && selectedDevice) {
           addLog("Connection state mismatch - attempting to reconnect...");
-          const savedDevice = (deviceManager as any)._selectedDevice.device;
+          const savedDevice = selectedDevice.device;
           try {
             await deviceManager.connect(savedDevice);
             addLog("Reconnection successful");

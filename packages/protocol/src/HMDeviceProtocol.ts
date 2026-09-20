@@ -871,6 +871,12 @@ export class HMDeviceProtocol {
    * @returns Payload bytes
    */
   public createDateTimePayload(date: Date = new Date()): Uint8Array {
+    // An invalid Date returns NaN from every accessor, which passes the range
+    // check below and then encodes as zero, so reject it up front.
+    if (Number.isNaN(date.getTime())) {
+      throw new Error("Date must be a valid Date");
+    }
+
     const year = date.getFullYear() - DATETIME_YEAR_EPOCH;
     if (year < 0 || year > 255) {
       throw new Error(

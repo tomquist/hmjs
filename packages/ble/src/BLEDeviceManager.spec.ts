@@ -55,4 +55,39 @@ describe("BLEDeviceManager", () => {
       ).rejects.toThrow(/does not support writing/);
     });
   });
+
+  describe("restartDevice", () => {
+    const connectedManager = (
+      writeValueWithoutResponse: jest.Mock,
+    ): BLEDeviceManager => {
+      const manager = new BLEDeviceManager();
+      const internals = manager as unknown as {
+        connected: boolean;
+        commandCharacteristic: unknown;
+      };
+      internals.connected = true;
+      internals.commandCharacteristic = { writeValueWithoutResponse };
+      return manager;
+    };
+
+    it("writes the restart frame once", async () => {
+      // Commands are repeated for reliability by default, but the device can
+      // drop the link after the first restart frame, which would turn a
+      // successful restart into a rejected promise.
+      const write = jest.fn().mockResolvedValue(undefined);
+      await connectedManager(write).restartDevice();
+
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(Array.from(write.mock.calls[0][0] as Uint8Array)).toEqual([
+        0x73, 0x06, 0x23, 0x25, 0x01, 0x72,
+      ]);
+    });
+
+    it("still repeats other commands", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      await connectedManager(write).setAdaptiveMode(true);
+
+      expect(write).toHaveBeenCalledTimes(2);
+    });
+  });
 });

@@ -827,13 +827,11 @@ const App: React.FC = () => {
       const deviceManager = deviceManagerRef.current;
       if (!deviceManager) return;
 
-      if (
-        !deviceManager.isConnected() &&
-        isConnected &&
-        (deviceManager as any)._selectedDevice
-      ) {
+      // BLEDeviceManager keeps the device in a private `device` field, so the
+      // app's own selectedDevice is what we can reconnect from.
+      if (!deviceManager.isConnected() && isConnected && selectedDevice) {
         addLog("Connection state mismatch - attempting to reconnect...");
-        const savedDevice = (deviceManager as any)._selectedDevice.device;
+        const savedDevice = selectedDevice.device;
         try {
           await deviceManager.connect(savedDevice);
           addLog("Reconnection successful");

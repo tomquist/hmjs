@@ -67,8 +67,8 @@ const DeviceControlTab: React.FC<DeviceControlTabProps> = ({
           />
           <button
             type="button"
-            onClick={() => onSetDod(Number(dod))}
-            disabled={!isConnected}
+            onClick={() => dod !== "" && onSetDod(Number(dod))}
+            disabled={!isConnected || dod === ""}
           >
             Set DOD
           </button>
@@ -86,8 +86,10 @@ const DeviceControlTab: React.FC<DeviceControlTabProps> = ({
           />
           <button
             type="button"
-            onClick={() => onSetDischargeThreshold(Number(threshold))}
-            disabled={!isConnected}
+            onClick={() =>
+              threshold !== "" && onSetDischargeThreshold(Number(threshold))
+            }
+            disabled={!isConnected || threshold === ""}
           >
             Set Threshold
           </button>

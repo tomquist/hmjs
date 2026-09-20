@@ -502,6 +502,14 @@ describe("HMDeviceProtocol", () => {
       expect(protocol.createDateTimePayload(new Date()).length).toBe(8);
     });
 
+    it("should reject an invalid Date", () => {
+      // Every accessor returns NaN, which slips past the range check and then
+      // encodes as an all-zero date.
+      expect(() => protocol.createDateTimePayload(new Date("nope"))).toThrow(
+        "Date must be a valid Date",
+      );
+    });
+
     it("should reject a year the byte cannot hold", () => {
       expect(() =>
         protocol.createDateTimePayload(new Date(1899, 0, 1)),

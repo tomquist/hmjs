@@ -837,7 +837,12 @@ class BLEDeviceManager {
    * The device drops the BLE connection while it reboots.
    */
   public async restartDevice(): Promise<void> {
-    await this.sendCommand(COMMAND_TYPES.RESTART_DEVICE, [0x01]);
+    // sendCommand repeats every frame by default. The device can drop the BLE
+    // link as soon as it acts on the first restart frame, which would make the
+    // second write fail and report a successful restart as an error.
+    await this.sendCommand(COMMAND_TYPES.RESTART_DEVICE, [0x01], {
+      sendTwice: false,
+    });
   }
 
   /**

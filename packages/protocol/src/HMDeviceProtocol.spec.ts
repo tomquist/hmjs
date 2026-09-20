@@ -3,6 +3,7 @@ import {
   COMMANDS,
   MQTTConfig,
   TimerInfo,
+  WIFI_ILLEGAL_CHARACTERS,
 } from "./HMDeviceProtocol.js";
 import "fast-text-encoding";
 
@@ -378,6 +379,54 @@ describe("HMDeviceProtocol", () => {
       const payload = protocol.createWifiConfigPayload(ssid, password);
       const expectedStr = `${ssid}<.,.>${password}`;
       expect(protocol.bytesToString(payload)).toBe(expectedStr);
+    });
+
+    // The device stores these characters incorrectly and then fails to join
+    // the network, so they have to be rejected before the command is sent.
+    it.each(WIFI_ILLEGAL_CHARACTERS)(
+      "should reject %s in the password",
+      (char) => {
+        expect(() =>
+          protocol.createWifiConfigPayload("TestSSID", `pass${char}word`),
+        ).toThrow("Password must not contain");
+      },
+    );
+
+    it.each(WIFI_ILLEGAL_CHARACTERS)("should reject %s in the SSID", (char) => {
+      expect(() =>
+        protocol.createWifiConfigPayload(`Test${char}SSID`, "TestPassword"),
+      ).toThrow("SSID must not contain");
+    });
+
+    it("should list every illegal character found", () => {
+      expect(() =>
+        protocol.createWifiConfigPayload("TestSSID", 'aaaa,bbbb"cccc'),
+      ).toThrow('Password must not contain `,` or `"`');
+    });
+
+    it("should reject a password shorter than the WPA minimum", () => {
+      expect(() =>
+        protocol.createWifiConfigPayload("TestSSID", "short12"),
+      ).toThrow("Password must be at least 8 characters.");
+    });
+
+    it("should accept a password of exactly the minimum length", () => {
+      const password = "12345678";
+      const payload = protocol.createWifiConfigPayload("TestSSID", password);
+      expect(protocol.bytesToString(payload)).toBe(`TestSSID<.,.>${password}`);
+    });
+
+    it("should not impose a length limit on the SSID", () => {
+      const payload = protocol.createWifiConfigPayload("A", "TestPassword");
+      expect(protocol.bytesToString(payload)).toBe("A<.,.>TestPassword");
+    });
+
+    it("should accept other special characters", () => {
+      // Reported in issue #13: only ',', '"' and '\\' are rejected, the rest
+      // of the usual password punctuation goes through untouched.
+      const password = "#!_*.&;$%@^()[]{}+-=~|/<>?:'";
+      const payload = protocol.createWifiConfigPayload("TestSSID", password);
+      expect(protocol.bytesToString(payload)).toBe(`TestSSID<.,.>${password}`);
     });
   });
 

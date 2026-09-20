@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adaptive mode (`0x11`), set date/time (`0x14`), restart (`0x25`), run
   diagnosis (`0x2A`) and read error info (`0x30`). Frames were taken from the
   official app; `0x2A` and `0x30` were not previously documented here.
+- A Device Control tab in the demo covering all ten: battery settings (DOD,
+  discharge threshold, charge mode, output channels, adaptive mode), device
+  actions (set clock, run diagnosis, restart) and the two read commands.
 - `CHARGE_MODE`, `OUTPUT_CHANNEL`, `DIAGNOSIS_VARIANT` and
   `DATETIME_YEAR_EPOCH` constants.
 ### Changed

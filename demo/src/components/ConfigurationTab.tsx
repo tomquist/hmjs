@@ -48,6 +48,11 @@ const ConfigurationTab: React.FC<ConfigurationTabProps> = ({
       {/* WiFi Configuration */}
       <div id="wifi-container" className="config-section">
         <h2>WiFi Configuration</h2>
+        <p className="config-hint">
+          SSID and password must not contain a comma, a double quote or a
+          backslash. The device cannot store those characters and will fail to
+          join the network.
+        </p>
         <form id="wifi-form">
           <div className="form-group">
             <label htmlFor="wifi-ssid">SSID:</label>

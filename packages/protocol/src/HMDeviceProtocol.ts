@@ -140,6 +140,17 @@ export const BASE_TIMER_SLOT_COUNT = 3;
 /** Number of timer slots supported by firmware >= 218 */
 export const EXTENDED_TIMER_SLOT_COUNT = 5;
 
+/**
+ * Characters the device cannot store in a WiFi SSID or password.
+ *
+ * The credentials travel as a single `ssid<.,.>password` string, and the
+ * firmware corrupts the stored value when it contains any of these. The
+ * result is a device that accepts the command and then silently fails to
+ * join the network. The official app rejects the same three characters in
+ * its WiFi form rather than sending them.
+ */
+export const WIFI_ILLEGAL_CHARACTERS = [",", '"', "\\"] as const;
+
 // Payload offsets of the timer slots within a 0x13 response
 const TIMER_SLOT_OFFSETS = [1, 8, 15, 39, 46] as const;
 const SMART_METER_OFFSET = 22;
@@ -700,15 +711,42 @@ export class HMDeviceProtocol {
    * @param ssid WiFi SSID
    * @param password WiFi password
    * @returns Payload bytes
+   * @throws If either value contains a character from
+   *   {@link WIFI_ILLEGAL_CHARACTERS}, which the device cannot store
    */
   public createWifiConfigPayload(ssid: string, password: string): Uint8Array {
     if (!ssid || !password) {
       throw new Error("SSID and password are required");
     }
 
+    this.validateWifiCredential(ssid, "SSID");
+    this.validateWifiCredential(password, "Password");
+
     // Create WiFi config string with <.,.> separator
     const configStr = `${ssid}<.,.>${password}`;
     return this.stringToBytes(configStr);
+  }
+
+  /**
+   * Reject WiFi credentials the device stores incorrectly
+   *
+   * The device would accept such a command and then fail to join the
+   * network, so refusing to send it is the only way to surface the problem.
+   *
+   * @param value Credential to check
+   * @param label Field name used in the error message
+   * @private
+   */
+  private validateWifiCredential(value: string, label: string): void {
+    const illegal = WIFI_ILLEGAL_CHARACTERS.filter((char) =>
+      value.includes(char),
+    );
+    if (illegal.length > 0) {
+      throw new Error(
+        `${label} must not contain ${illegal.map((char) => `\`${char}\``).join(" or ")}. ` +
+          `The device cannot store these characters and will fail to connect.`,
+      );
+    }
   }
 
   /**

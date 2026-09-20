@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 ### Removed
 ### Fixed
+- Reject `,`, `"` and `\` in the WiFi SSID and password instead of sending
+  them. The device stores those characters incorrectly and then fails to join
+  the network, which looked like a wrong password (#13).
 - Fall back to the deprecated `writeValue()` when the command characteristic
   does not implement `writeValueWithoutResponse()`. This fixes
   "writeValueWithoutResponse is not a function" errors on older Web Bluetooth

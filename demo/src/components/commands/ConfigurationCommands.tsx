@@ -44,6 +44,11 @@ const ConfigurationCommands: React.FC = () => {
           </p>
           <PayloadFormat format="[SSID]&lt;.,.&gt;[PASSWORD]" />
           <p>WiFi SSID and password separated by &lt;.,.&gt;</p>
+          <p>
+            Neither value may contain <code>,</code>, <code>&quot;</code> or{" "}
+            <code>\</code>: the device stores those characters incorrectly and
+            then fails to join the network.
+          </p>
           <PayloadExampleCommand>
             <strong>Example:</strong>{" "}
             <code>MyWifi&lt;.,.&gt;MyPassword123</code>

@@ -8,6 +8,7 @@ import {
   TimerInfoResponse,
   MQTTConfig,
   HMDeviceProtocol,
+  WIFI_ILLEGAL_CHARACTERS,
 } from "@tomquist/hmjs-protocol";
 import {
   DisclaimerModal,
@@ -647,6 +648,30 @@ const App: React.FC = () => {
 
     if (!password) {
       alert("Password is required");
+      return;
+    }
+
+    // Catch the characters the device cannot store before asking the user to
+    // confirm - otherwise the device accepts the command and then silently
+    // fails to join the network.
+    const illegalIn = (value: string) =>
+      WIFI_ILLEGAL_CHARACTERS.filter((char) => value.includes(char));
+    const illegalFields = [
+      { label: "SSID", chars: illegalIn(ssid) },
+      { label: "Password", chars: illegalIn(password) },
+    ].filter((field) => field.chars.length > 0);
+
+    if (illegalFields.length > 0) {
+      alert(
+        `${illegalFields
+          .map(
+            (field) =>
+              `${field.label} contains ${field.chars.map((char) => `\`${char}\``).join(" and ")}`,
+          )
+          .join("\n")}\n\n` +
+          `The device cannot store these characters and will fail to connect. ` +
+          `Change your WiFi credentials to avoid them.`,
+      );
       return;
     }
 

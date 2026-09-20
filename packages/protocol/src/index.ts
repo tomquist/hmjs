@@ -16,6 +16,7 @@ export {
   TIMER_ENTRY_SIZE,
   BASE_TIMER_SLOT_COUNT,
   EXTENDED_TIMER_SLOT_COUNT,
+  WIFI_ILLEGAL_CHARACTERS,
 } from "./HMDeviceProtocol.js";
 
 // Export types

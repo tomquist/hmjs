@@ -410,7 +410,8 @@ button#clear-logs-button:hover {
   border-radius: 4px;
 }
 
-.timers-hint {
+.timers-hint,
+.config-hint {
   margin: 0 0 15px;
   color: #5a6570;
   font-size: 0.9em;

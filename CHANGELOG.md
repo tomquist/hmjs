@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 ### Removed
 ### Fixed
+- Restore the demo's reconnect-on-drift path in the remaining eight command
+  handlers. They guarded on `_selectedDevice`, which `BLEDeviceManager` does
+  not have - its device lives in a private `device` field - so the guard was
+  always false and a drifted connection failed with "Not connected to device"
+  instead of reconnecting.
 - Correct the protocol reference, which had wrong length bytes in every
   single-payload-byte example (`73 05 …` where the device expects `73 06 …`).
   All documented example frames now carry a correct length and checksum.

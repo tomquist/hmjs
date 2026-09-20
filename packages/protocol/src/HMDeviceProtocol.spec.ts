@@ -447,7 +447,7 @@ describe("HMDeviceProtocol", () => {
       ).toThrow("Expected 3 or 5 timer entries, got 2");
     });
 
-    it("should accept 24:00 as end of day", () => {
+    it("should accept an end hour of 24 written by other tools", () => {
       const payload = protocol.createTimerConfigPayload([
         {
           enabled: true,

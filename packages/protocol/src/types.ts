@@ -45,7 +45,7 @@ export interface TimerInfo {
   };
   /** End time */
   end: {
-    /** Hour (0-24, the device uses 24:00 for "end of day") */
+    /** Hour (0-23; the device's end of day is 23:59) */
     hour: number;
     /** Minute (0-59) */
     minute: number;

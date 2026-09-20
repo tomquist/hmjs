@@ -780,7 +780,9 @@ export class HMDeviceProtocol {
     ) {
       throw new Error(`Timer ${index + 1}: start minute must be 0-59`);
     }
-    // The device uses 24:00 to express "end of day"
+    // The device's end of day is 23:59, but other tools write 24:00 for a
+    // timer that runs to midnight, so accept it rather than rejecting a
+    // schedule that was read back from such a device.
     if (
       !Number.isInteger(timer.end.hour) ||
       timer.end.hour < 0 ||

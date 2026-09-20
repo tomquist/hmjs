@@ -253,7 +253,7 @@ const TimersTab: React.FC<TimersTabProps> = ({
                       <input
                         type="number"
                         min={0}
-                        max={24}
+                        max={23}
                         value={timer.end.hour}
                         onChange={(e) =>
                           updateTimer(index, (t) => ({

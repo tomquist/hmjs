@@ -403,6 +403,13 @@ button#clear-logs-button:hover {
   font-weight: bold;
 }
 
+.timer-input {
+  width: 90px;
+  padding: 6px 8px;
+  border: 1px solid #ccd3da;
+  border-radius: 4px;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .container {

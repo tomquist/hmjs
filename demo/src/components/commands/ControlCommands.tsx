@@ -29,7 +29,7 @@ const ControlCommands: React.FC = () => {
           </StructureInfo>
 
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>73 05 23 0D 01 XX</code> (Enable
+            <strong>Example:</strong> <code>73 06 23 0D 01 5A</code> (Enable
             load first)
           </PayloadExampleCommand>
         </PayloadDetails>
@@ -57,24 +57,20 @@ const ControlCommands: React.FC = () => {
           </StructureInfo>
 
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>73 05 23 0E 03 XX</code> (Enable
+            <strong>Example:</strong> <code>73 06 23 0E 03 5B</code> (Enable
             both outputs: 0x03 = 0b00000011)
           </PayloadExampleCommand>
         </PayloadDetails>
       </PayloadCommand>
 
-      <PayloadCommand
-        commandCode="17 or 0x11"
-        commandName="Enable Adaptive Mode"
-      >
+      <PayloadCommand commandCode="17 or 0x11" commandName="Set Adaptive Mode">
         <PayloadDetails>
           <p>
-            <strong>Payload:</strong> Single byte (always 0x00)
+            <strong>Payload:</strong> Single byte flag
           </p>
-          <PayloadFormat format="[0x00]" />
-          <p>Uses encode_simple_command with 0x00 byte</p>
+          <PayloadFormat format="[0x00 = off, 0x01 = on]" />
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>73 05 23 11 00 XX</code> (Enable
+            <strong>Example:</strong> <code>73 06 23 11 01 46</code> (Enable
             adaptive mode)
           </PayloadExampleCommand>
         </PayloadDetails>
@@ -88,8 +84,25 @@ const ControlCommands: React.FC = () => {
           <PayloadFormat format="[0x01]" />
           <p>Uses encode_simple_command with 0x01 byte</p>
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>73 05 23 25 01 XX</code> (Reboot
+            <strong>Example:</strong> <code>73 06 23 25 01 72</code> (Reboot
             device)
+          </PayloadExampleCommand>
+        </PayloadDetails>
+      </PayloadCommand>
+
+      <PayloadCommand commandCode="42 or 0x2A" commandName="Run Diagnosis">
+        <PayloadDetails>
+          <p>
+            <strong>Payload:</strong> Single byte variant
+          </p>
+          <PayloadFormat format="[0x01 = legacy, 0xFF = current]" />
+          <p>
+            Re-runs the CT diagnosis. Newer firmware uses <code>0xFF</code>;
+            older builds use <code>0x01</code>.
+          </p>
+          <PayloadExampleCommand>
+            <strong>Example:</strong> <code>73 06 23 2A FF 83</code> (Run
+            diagnosis)
           </PayloadExampleCommand>
         </PayloadDetails>
       </PayloadCommand>
@@ -102,7 +115,7 @@ const ControlCommands: React.FC = () => {
           <PayloadFormat format="[0x01]" />
           <p>Uses encode_simple_command with 0x01 byte</p>
           <PayloadExampleCommand>
-            <strong>Example:</strong> <code>73 05 23 26 01 XX</code> (Factory
+            <strong>Example:</strong> <code>73 06 23 26 01 71</code> (Factory
             reset)
           </PayloadExampleCommand>
         </PayloadDetails>

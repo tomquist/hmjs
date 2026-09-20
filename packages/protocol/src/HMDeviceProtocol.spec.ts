@@ -4,6 +4,8 @@ import {
   MQTTConfig,
   TimerInfo,
   WIFI_ILLEGAL_CHARACTERS,
+  CHARGE_MODE,
+  OUTPUT_CHANNEL,
 } from "./HMDeviceProtocol.js";
 import "fast-text-encoding";
 
@@ -427,6 +429,121 @@ describe("HMDeviceProtocol", () => {
       const password = "#!_*.&;$%@^()[]{}+-=~|/<>?:'";
       const payload = protocol.createWifiConfigPayload("TestSSID", password);
       expect(protocol.bytesToString(payload)).toBe(`TestSSID<.,.>${password}`);
+    });
+  });
+
+  describe("createDodPayload", () => {
+    it("should encode the percentage as a single byte", () => {
+      expect(Array.from(protocol.createDodPayload(80))).toEqual([80]);
+    });
+
+    it.each([-1, 101, 1.5])("should reject %p", (value) => {
+      expect(() => protocol.createDodPayload(value)).toThrow(
+        "Depth of discharge must be an integer between 0 and 100",
+      );
+    });
+  });
+
+  describe("createDischargeThresholdPayload", () => {
+    it("should encode watts little-endian", () => {
+      // 1000W = 0x03e8
+      expect(
+        Array.from(protocol.createDischargeThresholdPayload(1000)),
+      ).toEqual([0xe8, 0x03]);
+    });
+
+    it.each([-1, 0x10000])("should reject %p", (value) => {
+      expect(() => protocol.createDischargeThresholdPayload(value)).toThrow(
+        "Discharge threshold must be an integer between 0 and 65535",
+      );
+    });
+  });
+
+  describe("createChargeModePayload", () => {
+    it("should encode the mode", () => {
+      expect(
+        Array.from(protocol.createChargeModePayload(CHARGE_MODE.FULL)),
+      ).toEqual([1]);
+      expect(
+        Array.from(protocol.createChargeModePayload(CHARGE_MODE.HALF)),
+      ).toEqual([0]);
+    });
+
+    it("should reject an unknown mode", () => {
+      expect(() => protocol.createChargeModePayload(2)).toThrow("Charge mode");
+    });
+  });
+
+  describe("createOutputChannelsPayload", () => {
+    it("should encode a combined mask", () => {
+      const mask = OUTPUT_CHANNEL.OUT1 | OUTPUT_CHANNEL.OUT2;
+      expect(Array.from(protocol.createOutputChannelsPayload(mask))).toEqual([
+        3,
+      ]);
+    });
+
+    it("should reject a mask outside the two channels", () => {
+      expect(() => protocol.createOutputChannelsPayload(4)).toThrow(
+        "Output channel mask must be an integer between 0 and 3",
+      );
+    });
+  });
+
+  describe("createDateTimePayload", () => {
+    // The device uses the struct tm convention: year - 1900, month 0-based.
+    it("should encode the six date fields plus two trailing zeros", () => {
+      const date = new Date(2024, 11, 15, 14, 30, 45); // 15 Dec 2024, local
+      expect(Array.from(protocol.createDateTimePayload(date))).toEqual([
+        124, 11, 15, 14, 30, 45, 0, 0,
+      ]);
+    });
+
+    it("should produce the 8 payload bytes the device expects", () => {
+      expect(protocol.createDateTimePayload(new Date()).length).toBe(8);
+    });
+
+    it("should reject a year the byte cannot hold", () => {
+      expect(() =>
+        protocol.createDateTimePayload(new Date(1899, 0, 1)),
+      ).toThrow("Year must be between 1900 and 2155");
+    });
+  });
+
+  // The official app sends these exact frames. Keeping them here means a
+  // change to the framing or to a payload builder has to be deliberate.
+  describe("device command frames", () => {
+    const hex = (bytes: Uint8Array) =>
+      Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(" ");
+
+    it.each([
+      ["read wifi info", COMMANDS.GET_WIFI_INFO, [0x01], "73 06 23 08 01 5f"],
+      ["charge full", COMMANDS.SET_CHARGE_MODE, [0x01], "73 06 23 0d 01 5a"],
+      ["charge half", COMMANDS.SET_CHARGE_MODE, [0x00], "73 06 23 0d 00 5b"],
+      [
+        "both outputs on",
+        COMMANDS.SET_OUTPUT_CHANNELS,
+        [0x03],
+        "73 06 23 0e 03 5b",
+      ],
+      ["adaptive on", COMMANDS.SET_ADAPTIVE_MODE, [0x01], "73 06 23 11 01 46"],
+      ["restart", COMMANDS.RESTART_DEVICE, [0x01], "73 06 23 25 01 72"],
+      ["diagnosis", COMMANDS.RUN_DIAGNOSIS, [0xff], "73 06 23 2a ff 83"],
+      ["error info", COMMANDS.GET_ERROR_INFO, [0x01], "73 06 23 30 01 67"],
+    ])("should match the app's %s frame", (_name, command, payload, want) => {
+      expect(hex(protocol.createCommandMessage(command, payload))).toBe(want);
+    });
+
+    it("should match the app's date/time frame shape", () => {
+      const payload = protocol.createDateTimePayload(
+        new Date(2024, 11, 15, 14, 30, 45),
+      );
+      const frame = protocol.createCommandMessage(
+        COMMANDS.SET_DATETIME,
+        payload,
+      );
+      expect(hex(frame)).toBe("73 0d 23 14 7c 0b 0f 0e 1e 2d 00 00 0c");
     });
   });
 

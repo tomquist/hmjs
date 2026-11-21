@@ -24,8 +24,23 @@
 
 type Listener = (event: { target: unknown; type: string }) => void;
 
+/**
+ * The part of a WebSocket the emulator uses, so that both the browser's (and
+ * Node 22's) and the `ws` package's fit.
+ */
+export interface EmulatorWebSocket {
+  binaryType: string;
+  readonly readyState: number;
+  onopen: unknown;
+  onclose: unknown;
+  onerror: unknown;
+  onmessage: unknown;
+  send(data: Uint8Array): void;
+  close(): void;
+}
+
 /** WebSocket constructor; defaults to the global one (browsers, Node 22+). */
-type WebSocketCtor = new (url: string) => WebSocket;
+export type WebSocketCtor = new (url: string) => EmulatorWebSocket;
 
 interface DeviceDescription {
   type: "device";
@@ -108,7 +123,7 @@ class EmulatorCharacteristic extends Emitter {
 
 /** The WebSocket to marsemu, opened on demand and reopened on reconnect. */
 class EmulatorLink {
-  ws: WebSocket | null = null;
+  ws: EmulatorWebSocket | null = null;
   info: DeviceDescription | null = null;
   readonly write: EmulatorCharacteristic;
   readonly status: EmulatorCharacteristic;
@@ -130,7 +145,7 @@ class EmulatorLink {
   connect(): Promise<void> {
     if (this.open) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      let ws: WebSocket;
+      let ws: EmulatorWebSocket;
       try {
         ws = new this.WS(this.url);
       } catch (error) {
@@ -162,7 +177,7 @@ class EmulatorLink {
           this.onClose();
         }
       };
-      ws.onmessage = (event: MessageEvent) => {
+      ws.onmessage = (event: { data: unknown }) => {
         if (typeof event.data === "string") {
           try {
             const msg = JSON.parse(event.data);

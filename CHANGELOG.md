@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Support for the other Marstek devices: Venus C/E, Venus E 3.0/A/D, Venus E
+  Mini, Jupiter C/E/C Plus and the CT002/CT003 meters. The demo finds them,
+  sets up their Wi-Fi, and shows their status, battery and cell voltages,
+  grid and PV readings where the device reports them, and lets you set the
+  depth of discharge and status LED where supported.
 - Ten more device commands, with typed `BLEDeviceManager` methods: read WiFi
   info (`0x08`), set depth of discharge (`0x0B`), set discharge threshold
   (`0x0C`), set charge mode (`0x0D`), set output channels (`0x0E`), set

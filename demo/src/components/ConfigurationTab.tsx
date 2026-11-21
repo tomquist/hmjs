@@ -6,6 +6,8 @@ interface ConfigurationTabProps {
   onSetWifiConfig: (ssid: string, password: string) => void;
   onSetMqttConfig: (config: MQTTConfig) => void;
   onResetMqttConfig: () => void;
+  /** MQTT broker settings exist on the B2500 only */
+  showMqtt?: boolean;
 }
 
 const ConfigurationTab: React.FC<ConfigurationTabProps> = ({
@@ -13,6 +15,7 @@ const ConfigurationTab: React.FC<ConfigurationTabProps> = ({
   onSetWifiConfig,
   onSetMqttConfig,
   onResetMqttConfig,
+  showMqtt = true,
 }) => {
   // WiFi config state
   const [wifiSsid, setWifiSsid] = useState("");
@@ -84,84 +87,86 @@ const ConfigurationTab: React.FC<ConfigurationTabProps> = ({
         </form>
       </div>
 
-      {/* MQTT Configuration */}
-      <div id="mqtt-container" className="config-section">
-        <h2>MQTT Configuration</h2>
-        <form id="mqtt-form">
-          <div className="form-group">
-            <label htmlFor="ssl">SSL:</label>
-            <input
-              type="checkbox"
-              id="ssl"
-              checked={mqttSsl}
-              onChange={(e) => setMqttSsl(e.target.checked)}
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="host">Host:</label>
-            <input
-              type="text"
-              id="host"
-              placeholder="MQTT Broker Host"
-              value={mqttHost}
-              onChange={(e) => setMqttHost(e.target.value)}
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="port">Port:</label>
-            <input
-              type="text"
-              id="port"
-              placeholder="1883"
-              value={mqttPort}
-              onChange={(e) => setMqttPort(e.target.value)}
-              // Restrict to numbers only
-              onInput={(e) => {
-                e.currentTarget.value = e.currentTarget.value.replace(
-                  /[^0-9]/g,
-                  "",
-                );
-              }}
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="username">Username:</label>
-            <input
-              type="text"
-              id="username"
-              placeholder="MQTT Username"
-              value={mqttUsername}
-              onChange={(e) => setMqttUsername(e.target.value)}
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="password">Password:</label>
-            <input
-              type="password"
-              id="password"
-              placeholder="MQTT Password"
-              value={mqttPassword}
-              onChange={(e) => setMqttPassword(e.target.value)}
-            />
-          </div>
-          <div className="button-group">
-            <button
-              type="button"
-              onClick={handleSetMqttConfig}
-              disabled={!isConnected}
-            >
-              Set MQTT Config
-            </button>
-            <button
-              type="button"
-              onClick={onResetMqttConfig}
-              disabled={!isConnected}
-            >
-              Reset MQTT Config
-            </button>
-          </div>
-        </form>
-      </div>
+      {/* MQTT Configuration (B2500 only) */}
+      {showMqtt && (
+        <div id="mqtt-container" className="config-section">
+          <h2>MQTT Configuration</h2>
+          <form id="mqtt-form">
+            <div className="form-group">
+              <label htmlFor="ssl">SSL:</label>
+              <input
+                type="checkbox"
+                id="ssl"
+                checked={mqttSsl}
+                onChange={(e) => setMqttSsl(e.target.checked)}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="host">Host:</label>
+              <input
+                type="text"
+                id="host"
+                placeholder="MQTT Broker Host"
+                value={mqttHost}
+                onChange={(e) => setMqttHost(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="port">Port:</label>
+              <input
+                type="text"
+                id="port"
+                placeholder="1883"
+                value={mqttPort}
+                onChange={(e) => setMqttPort(e.target.value)}
+                // Restrict to numbers only
+                onInput={(e) => {
+                  e.currentTarget.value = e.currentTarget.value.replace(
+                    /[^0-9]/g,
+                    "",
+                  );
+                }}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="username">Username:</label>
+              <input
+                type="text"
+                id="username"
+                placeholder="MQTT Username"
+                value={mqttUsername}
+                onChange={(e) => setMqttUsername(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="password">Password:</label>
+              <input
+                type="password"
+                id="password"
+                placeholder="MQTT Password"
+                value={mqttPassword}
+                onChange={(e) => setMqttPassword(e.target.value)}
+              />
+            </div>
+            <div className="button-group">
+              <button
+                type="button"
+                onClick={handleSetMqttConfig}
+                disabled={!isConnected}
+              >
+                Set MQTT Config
+              </button>
+              <button
+                type="button"
+                onClick={onResetMqttConfig}
+                disabled={!isConnected}
+              >
+                Reset MQTT Config
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };

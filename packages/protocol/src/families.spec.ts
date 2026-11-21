@@ -14,6 +14,8 @@ import {
   parseVenus3BatteryInfo,
   parseVenus3InverterInfo,
   parseVenus3RuntimeInfo,
+  parseVenusBatteryInfo,
+  parseVenusRuntimeInfo,
   parseVenusMiniBatteryInfo,
   parseVenusMiniRuntimeInfo,
 } from "./families.js";
@@ -44,6 +46,15 @@ const VENUS_D = {
   ),
   battery: hex(
     "73562314760040026400f4015f000000000ad5145a001b005b00f400000000000000000000000000fa00fa000e010e010e010e01fd0cff0cff0c010d020d030d040d050d0d0d0e0d0f0d100d130d140d150d160d0028",
+  ),
+};
+
+const VENUS_CE = {
+  runtime: hex(
+    "737223030000af0103010101033d013e9a00000000000100000000000000000000000000000000000000000000000000000000000000000100000000000000000030000000000000000000000000c409030101d800323032343039303930313539000300000003f2640030750000010000eb",
+  ),
+  battery: hex(
+    "73552314d8003b02e803e8033e0064000014b31400000200c0003d010000000000001b007fe10100000019001b001b001b001b00e00ce00ce10ce20ce30ce40ce50ce60ce70ce80ce90cea0ceb0cec0ced0cee0c75",
   ),
 };
 
@@ -209,6 +220,46 @@ describe("Venus E 3.0 / A / D", () => {
       command: 0x08,
       data: "EmuNet",
     });
+  });
+});
+
+describe("Venus C/E", () => {
+  it("decodes the status block", () => {
+    expect(parseVenusRuntimeInfo(framePayload(VENUS_CE.runtime))).toMatchObject(
+      {
+        acPower: 431,
+        soc: 62,
+        remainingEnergy: 3170,
+        firmwareVersion: 154,
+        wifiSignal: -48,
+        bmsVersion: 216,
+        wifiModuleVersion: "202409090159",
+        localApiPort: 30000,
+      },
+    );
+  });
+
+  it("decodes the battery block, with whole-degree temperatures", () => {
+    const info = parseVenusBatteryInfo(framePayload(VENUS_CE.battery));
+    expect(info).toMatchObject({
+      bmsVersion: 216,
+      soc: 62,
+      ratedCapacity: 5120,
+      voltage: 52.99,
+      remainingEnergy: 3170,
+      temperatures: [27, 27, 27, 27],
+    });
+    expect(info.cellVoltages).toHaveLength(16);
+    expect(info.cellVoltages[0]).toBe(3296);
+  });
+
+  it("routes Venus C/E replies through decodeFamilyMessage", () => {
+    expect(decodeFamilyMessage("venus", VENUS_CE.battery)?.kind).toBe(
+      "batteryInfo",
+    );
+    expect(decodeFamilyMessage("venus", VENUS_CE.runtime)?.kind).toBe(
+      "runtimeInfo",
+    );
   });
 });
 

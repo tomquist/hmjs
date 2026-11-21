@@ -31,6 +31,7 @@ import type {
   NetworkInfo,
   Venus3InverterInfo,
   Venus3RuntimeInfo,
+  VenusRuntimeInfo,
   VenusMiniRuntimeInfo,
 } from "@tomquist/hmjs-protocol";
 import {
@@ -1101,15 +1102,18 @@ class BLEDeviceManager {
   }
 
   /**
-   * Status of a Venus E 3.0/A/D, Venus E Mini or Jupiter (`0x03`).
+   * Status of a Venus, Venus E Mini or Jupiter (`0x03`).
    *
    * For a B2500 use {@link getRuntimeInfo}.
    */
   public async getStatus(): Promise<
-    Venus3RuntimeInfo | VenusMiniRuntimeInfo | JupiterRuntimeInfo
+    | Venus3RuntimeInfo
+    | VenusRuntimeInfo
+    | VenusMiniRuntimeInfo
+    | JupiterRuntimeInfo
   > {
     this.requireFamily("RUNTIME_INFO", "getStatus");
-    if (this.family === "venus" || this.family === "meter") {
+    if (this.family === "meter") {
       throw new Error(
         "getStatus() does not decode this family yet; use request(0x03) for the raw reply.",
       );
@@ -1118,8 +1122,8 @@ class BLEDeviceManager {
   }
 
   /**
-   * Battery data with cell voltages (`0x14`): Venus E 3.0/A/D, Venus E Mini
-   * and Jupiter.
+   * Battery data with cell voltages (`0x14`): every Venus model and the
+   * Jupiter.
    */
   public async getBatteryInfo(): Promise<BatteryInfo> {
     const family = this.requireFamily("BATTERY_INFO", "getBatteryInfo");

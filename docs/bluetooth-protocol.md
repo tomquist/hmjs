@@ -40,13 +40,13 @@ rather than the control board; their protocol is not covered here.
 
 | Cmd | Payload | Reply | Families |
 |---|---|---|---|
-| `0x03` | none | status block, see below | all |
+| `0x03` | none | status block, see below | all (decoded: every family but the meters) |
 | `0x04` | `0x01` | `type=…,id=…,mac=…` plus versions, as text | all (the Venus E 3.0/A/D only answer with the `0x01`) |
 | `0x05` | `ssid<.,.>password` | — | all |
 | `0x08` | none | name of the configured Wi-Fi network, as text | `venus`, `venus3` |
 | `0x0B` | none | clock: year (u16), month, day, hour, minute, second, weekday (0 = Sunday) | `venus3`, `jupiter` |
 | `0x0D` | none | grid and inverter, see below | `venus3` |
-| `0x14` | none | battery data with cells, see below | `venus3`, `venusMini`, `jupiter` |
+| `0x14` | none | battery data with cells, see below | `venus`, `venus3`, `venusMini`, `jupiter` |
 | `0x24` | none | `ip:…,gate:…,mask:…,dns:…` | `venus`, `venusMini` |
 | `0x54` | percent (u8) | — sets the depth of discharge | `venus3` (30–88), `jupiter` (30–90) |
 | `0x59` | `0x01` on, `0x00` off | — sets the status LED | `venus3` |
@@ -160,11 +160,25 @@ are measurements. None of this is available over MQTT.
 | 124, 126 | u16 | highest and lowest cell, mV (Jupiter C Plus) |
 | 154 | 6 × i16 | temperatures, ×0.1 °C (whole °C on the C Plus) |
 
-### Venus C / E and CT002 / CT003
+### Venus C / E
 
-Device info, Wi-Fi setup and, on the Venus C/E, the Wi-Fi network name and
-network info work as above. Their status blocks are not decoded yet; the
-library returns them raw.
+`0x03` status (109 bytes) has the Venus E 3.0 header: AC power i16 at 2 (W,
+as the device reports it), remaining energy u16 at 9 (×10 Wh), state of charge
+u8 at 11 (%), control firmware version u16 at 12, Wi-Fi signal u8 at 61
+(−dBm), BMS firmware version u16 at 79, Wi-Fi module firmware version at 81
+(12 characters) and the local API port u16 at 102. There is no inverter
+version: the control board runs the power stage itself.
+
+`0x14` battery (80 bytes) has the Venus E 3.0 layout, with the four
+temperatures at 40 in whole °C.
+
+`0x25` sets the Shelly port and `0x28` the local API port, as on the Venus E
+3.0; their payload format is not mapped, so the library does not offer them.
+
+### CT002 / CT003
+
+Device info and Wi-Fi setup work as above. The status block is not decoded
+yet; the library returns it raw.
 
 ## How this was mapped
 
@@ -177,6 +191,10 @@ hardware, at two different operating points so that a match also had to
 follow a change. Settings were mapped by sending each command a value derived
 from its own number and watching which MQTT status field took that value.
 Fields are listed only where that left no doubt.
+
+The Venus C/E runs its 30 kHz power-stage control loop on the control board,
+which the emulator executes at about a ninth of real time; its run took half
+an hour.
 
 The library was then tested end to end against the emulated Venus E 3.0,
 Jupiter and Venus E Mini. Real devices may run newer firmware; if a value

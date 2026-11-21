@@ -94,8 +94,8 @@ known about each:
 | | B2500 | Venus C/E | Venus E 3.0/A/D | Venus E Mini | Jupiter | CT002/CT003 |
 |---|---|---|---|---|---|---|
 | Device info, Wi-Fi setup | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Status (`getStatus`) | `getRuntimeInfo` | raw | ✓ | ✓ | ✓ | raw |
-| Battery and cell voltages (`getBatteryInfo`) | `getCellInfo` | | ✓ | ✓ | ✓ | |
+| Status (`getStatus`) | `getRuntimeInfo` | ✓ | ✓ | ✓ | ✓ | raw |
+| Battery and cell voltages (`getBatteryInfo`) | `getCellInfo` | ✓ | ✓ | ✓ | ✓ | |
 | Grid, PV and battery (`getSystemInfo`) | | | | | ✓ | |
 | Grid and inverter (`getInverterInfo`) | | | ✓ | | | |
 | Device clock (`getDeviceTime`) | | | ✓ | | ✓ | |

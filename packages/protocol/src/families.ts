@@ -130,7 +130,7 @@ export const MARSTEK_COMMANDS = {
   GET_DATETIME: 0x0b,
   /** Grid and inverter measurements (Venus E 3.0/A/D) */
   INVERTER_INFO: 0x0d,
-  /** Battery data with cell voltages (Venus E 3.0/A/D, Jupiter, Venus E Mini) */
+  /** Battery data with cell voltages (all Venus models, Jupiter) */
   BATTERY_INFO: 0x14,
   /** `ip:…,gate:…,mask:…,dns:…` (Venus C/E, Venus E Mini) */
   GET_NETWORK_INFO: 0x24,
@@ -177,7 +177,7 @@ export const FAMILY_SUPPORT: Readonly<
   GET_WIFI_SSID: ["venus", "venus3"],
   GET_DATETIME: ["venus3", "jupiter"],
   INVERTER_INFO: ["venus3"],
-  BATTERY_INFO: ["venus3", "jupiter", "venusMini"],
+  BATTERY_INFO: ["venus3", "jupiter", "venusMini", "venus"],
   GET_NETWORK_INFO: ["venus", "venusMini"],
   SET_DOD: ["venus3", "jupiter"],
   SET_LED: ["venus3"],
@@ -370,6 +370,43 @@ export function parseVenus3RuntimeInfo(payload: Uint8Array): Venus3RuntimeInfo {
   };
 }
 
+/** Status block of a Venus C/E (`0x03`): the Venus E 3.0 header. */
+export interface VenusRuntimeInfo {
+  /** AC power in W, as the device reports it */
+  acPower?: number;
+  /** State of charge in percent */
+  soc?: number;
+  /** Energy left in the battery in Wh */
+  remainingEnergy?: number;
+  /** Wi-Fi signal in dBm */
+  wifiSignal?: number;
+  /** Control firmware version */
+  firmwareVersion?: number;
+  /** BMS firmware version */
+  bmsVersion?: number;
+  /** Wi-Fi module firmware version */
+  wifiModuleVersion?: string;
+  /** Port of the local API */
+  localApiPort?: number;
+  rawPayload: Uint8Array;
+}
+
+export function parseVenusRuntimeInfo(payload: Uint8Array): VenusRuntimeInfo {
+  const r = new Reader(payload);
+  const signal = r.u8(61);
+  return {
+    acPower: r.i16(2),
+    remainingEnergy: r.scaled(r.u16(9), 10),
+    soc: r.u8(11),
+    firmwareVersion: r.u16(12),
+    wifiSignal: signal === undefined ? undefined : -signal,
+    bmsVersion: r.u16(79),
+    wifiModuleVersion: r.ascii(81, 12),
+    localApiPort: r.u16(102),
+    rawPayload: payload.slice(),
+  };
+}
+
 /** Grid and inverter measurements of a Venus E 3.0, A or D (`0x0D`). */
 export interface Venus3InverterInfo {
   /** Grid frequency in Hz */
@@ -419,6 +456,21 @@ export interface BatteryInfo {
 }
 
 export function parseVenus3BatteryInfo(payload: Uint8Array): BatteryInfo {
+  return parseVenusBatteryLayout(payload, 0.1);
+}
+
+/**
+ * Battery data of a Venus C/E (`0x14`): the Venus E 3.0 layout, with the
+ * temperatures in whole °C.
+ */
+export function parseVenusBatteryInfo(payload: Uint8Array): BatteryInfo {
+  return parseVenusBatteryLayout(payload, 1);
+}
+
+function parseVenusBatteryLayout(
+  payload: Uint8Array,
+  temperatureScale: number,
+): BatteryInfo {
   const r = new Reader(payload);
   return {
     bmsVersion: r.u16(0),
@@ -430,7 +482,7 @@ export function parseVenus3BatteryInfo(payload: Uint8Array): BatteryInfo {
     temperatures: r
       .u16s(40, 4)
       .map((t) => (t << 16) >> 16)
-      .map((t) => t / 10),
+      .map((t) => r.scaled(t, temperatureScale)!),
     cellVoltages: r.u16s(48, 16),
     rawPayload: payload.slice(),
   };
@@ -627,7 +679,11 @@ export type FamilyMessage =
   | {
       kind: "runtimeInfo";
       command: number;
-      data: Venus3RuntimeInfo | VenusMiniRuntimeInfo | JupiterRuntimeInfo;
+      data:
+        | Venus3RuntimeInfo
+        | VenusRuntimeInfo
+        | VenusMiniRuntimeInfo
+        | JupiterRuntimeInfo;
     }
   | { kind: "batteryInfo"; command: number; data: BatteryInfo }
   | { kind: "systemInfo"; command: number; data: JupiterSystemInfo }
@@ -689,6 +745,20 @@ export function decodeFamilyMessage(
           kind: "inverterInfo",
           command,
           data: parseVenus3InverterInfo(payload),
+        };
+      break;
+    case "venus":
+      if (command === C.RUNTIME_INFO)
+        return {
+          kind: "runtimeInfo",
+          command,
+          data: parseVenusRuntimeInfo(payload),
+        };
+      if (command === C.BATTERY_INFO)
+        return {
+          kind: "batteryInfo",
+          command,
+          data: parseVenusBatteryInfo(payload),
         };
       break;
     case "venusMini":

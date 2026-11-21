@@ -102,7 +102,7 @@ const READINGS: Reading[] = [
     title: "Status",
     command: "RUNTIME_INFO",
     read: (m) => m.getStatus(),
-    families: ["venus3", "venusMini", "jupiter"],
+    families: ["venus", "venus3", "venusMini", "jupiter"],
   },
   {
     title: "Battery and cells",

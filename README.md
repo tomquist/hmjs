@@ -67,6 +67,33 @@ Open your browser to the provided URL and use the demo interface to:
 - Read and edit the manual-mode timer schedule
 - Configure device settings
 
+### Without a device: the marsemu emulator
+
+[marsemu](https://github.com/tomquist/marsemu) runs a device's own firmware
+without the hardware and serves its Bluetooth over WebSocket. Start it with
+`--ble-ws`, then open the demo with `?emulator=` pointing at it; the scan
+then finds the emulated device instead of opening the browser's picker.
+This works in any browser, without Web Bluetooth or a Bluetooth adapter:
+
+```bash
+marsemu venus3 CONTROL.bin BMS.bin --realtime --ble-ws 7101
+# https://tomquist.github.io/hmjs/?emulator=ws://localhost:7101/
+```
+
+The URL can also be entered in the demo's advanced connection options, and
+marsemu's dashboard has an "Open in hmjs" button that does it for you. In
+code, pass `createEmulatorBluetooth(url)` as the manager's `bluetooth`
+option:
+
+```ts
+import { BLEDeviceManager, createEmulatorBluetooth } from "@tomquist/hmjs-ble";
+
+const manager = new BLEDeviceManager({
+  bluetooth: createEmulatorBluetooth("ws://localhost:7101/"),
+});
+await manager.connect();
+```
+
 ### Using the Library
 
 ```typescript
@@ -174,7 +201,7 @@ npm run lint
 
 ## Browser Compatibility
 
-Requires a browser with Web Bluetooth API support (Chrome, Edge, Opera on desktop; limited mobile support).
+Requires a browser with Web Bluetooth API support (Chrome, Edge, Opera on desktop; limited mobile support). With an emulated device (`?emulator=`), any browser with WebSocket works.
 
 ## License
 

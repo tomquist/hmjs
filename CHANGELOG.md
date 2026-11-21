@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grid and PV readings where the device reports them, and lets you change
   their working mode, schedule and settings (depth of discharge, LED,
   Bluetooth, surplus feed-in, local API, power limits and more, per model).
+- Try the demo and the library without a device: they connect to a device
+  emulated by [marsemu](https://github.com/tomquist/marsemu) when given its
+  WebSocket address (`?emulator=ws://localhost:7101/`, or
+  `createEmulatorBluetooth`), in any browser.
 - B2500: Wi-Fi signal, Wi-Fi module version, battery pack voltages, CT
   status, rated power and network info, and settings for region, smart
   meter, surplus feed-in and factory reset. CT002/CT003: status with phase

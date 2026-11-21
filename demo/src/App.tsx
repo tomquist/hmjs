@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { BLEDeviceManager, DeviceType } from "@tomquist/hmjs-ble";
+import {
+  BLEDeviceManager,
+  DeviceType,
+  createEmulatorBluetooth,
+} from "@tomquist/hmjs-ble";
 import {
   DeviceInfo,
   RuntimeInfo,
@@ -60,9 +64,28 @@ const App: React.FC = () => {
   // Disclaimer state
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
 
-  // Web Bluetooth unsupported state
+  // An emulated device in marsemu (?emulator=ws://localhost:7101/) instead
+  // of Web Bluetooth
+  const [emulatorUrl, setEmulatorUrl] = useState(
+    () => new URLSearchParams(window.location.search).get("emulator") ?? "",
+  );
+  const emulatorRef = useRef<{ url: string; bluetooth: Bluetooth } | null>(
+    null,
+  );
+  const emulatorBluetooth = (): Bluetooth | undefined => {
+    const url = emulatorUrl.trim();
+    if (!url) return undefined;
+    if (emulatorRef.current?.url !== url) {
+      emulatorRef.current = { url, bluetooth: createEmulatorBluetooth(url) };
+    }
+    return emulatorRef.current.bluetooth;
+  };
+
+  // Web Bluetooth unsupported state (irrelevant when talking to an emulator)
   const [bluetoothUnsupported, setBluetoothUnsupported] = useState(
-    () => !isBluetoothSupported(),
+    () =>
+      !isBluetoothSupported() &&
+      !new URLSearchParams(window.location.search).get("emulator"),
   );
 
   // State variables
@@ -292,7 +315,10 @@ const App: React.FC = () => {
     });
 
     // Check if Web Bluetooth API is supported
-    if (!isBluetoothSupported()) {
+    if (
+      !isBluetoothSupported() &&
+      !new URLSearchParams(window.location.search).get("emulator")
+    ) {
       logFunction("Web Bluetooth API is not supported in this browser");
       setBluetoothUnsupported(true);
       setConnectionStatus("Bluetooth not supported in this browser");
@@ -364,6 +390,7 @@ const App: React.FC = () => {
           // Use the BLE package's scanForDevices method
           const device = await deviceManagerRef.current.scanForDevices({
             acceptAllDevices: allowAnyDevice,
+            bluetooth: emulatorBluetooth(),
           });
 
           // Only proceed if we have a valid device. Whitelabeled devices may
@@ -1103,6 +1130,8 @@ const App: React.FC = () => {
         onAutoReconnectChange={setAutoReconnect}
         onAllowAnyDeviceChange={setAllowAnyDevice}
         onDeviceTypeChange={setDeviceType}
+        emulatorUrl={emulatorUrl}
+        onEmulatorUrlChange={setEmulatorUrl}
       />
 
       <div className="tabs">

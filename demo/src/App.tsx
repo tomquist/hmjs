@@ -266,6 +266,8 @@ const App: React.FC = () => {
 
     deviceManager.on("reconnect", (device: BluetoothDevice) => {
       setIsConnected(true);
+      // the same device: its family, which the disconnect cleared
+      setFamily(deviceManager.getFamily());
       setConnectionStatus(`Reconnected to ${device.name || "device"}`);
 
       setSelectedDevice({
@@ -1100,7 +1102,15 @@ const App: React.FC = () => {
   };
 
   if (bluetoothUnsupported) {
-    return <BluetoothUnsupportedModal isIOS={isIOS()} />;
+    return (
+      <BluetoothUnsupportedModal
+        isIOS={isIOS()}
+        onUseEmulator={(url) => {
+          setEmulatorUrl(url);
+          setBluetoothUnsupported(false);
+        }}
+      />
+    );
   }
 
   if (!disclaimerAccepted) {
@@ -1258,6 +1268,8 @@ const App: React.FC = () => {
 
         {activeTab === TabType.FamilyStatus && (
           <FamilyStatusTab
+            // a new device starts with a fresh tab, not the last one's readings
+            key={selectedDevice?.id ?? "none"}
             family={family ?? "b2500"}
             isConnected={isConnected}
             manager={deviceManagerRef.current}

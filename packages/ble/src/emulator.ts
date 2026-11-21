@@ -138,6 +138,8 @@ class EmulatorLink {
         return;
       }
       ws.binaryType = "arraybuffer";
+      // what the previous connection said about the device no longer holds
+      this.info = null;
       let opened = false;
       ws.onopen = () => {
         opened = true;
@@ -156,6 +158,7 @@ class EmulatorLink {
       ws.onclose = () => {
         if (this.ws === ws) {
           this.ws = null;
+          this.info = null;
           this.onClose();
         }
       };
@@ -191,6 +194,7 @@ class EmulatorLink {
   close(): void {
     const ws = this.ws;
     this.ws = null;
+    this.info = null;
     ws?.close();
   }
 }
@@ -314,27 +318,34 @@ export function createEmulatorBluetooth(
 
   const bluetooth = {
     async requestDevice(opts: RequestOptions = {}) {
-      await link.connect();
-      const info = await waitForAdvertising();
-      const name = info.name ?? "";
-      const filters = opts.filters ?? [];
-      const matches =
-        opts.acceptAllDevices ||
-        filters.length === 0 ||
-        filters.some(
-          (f) =>
-            (f.namePrefix === undefined || name.startsWith(f.namePrefix)) &&
-            (f.name === undefined || name === f.name),
-        );
-      if (!matches) {
-        throw Object.assign(
-          new Error(`The emulated device ${name} does not match the filters`),
-          { name: "NotFoundError" },
-        );
+      // a device that is connected keeps its connection if this fails
+      const keep = () => device?.gatt.connected ?? false;
+      try {
+        await link.connect();
+        const info = await waitForAdvertising();
+        const name = info.name ?? "";
+        const filters = opts.filters ?? [];
+        const matches =
+          opts.acceptAllDevices ||
+          filters.length === 0 ||
+          filters.some(
+            (f) =>
+              (f.namePrefix === undefined || name.startsWith(f.namePrefix)) &&
+              (f.name === undefined || name === f.name),
+          );
+        if (!matches) {
+          throw Object.assign(
+            new Error(`The emulated device ${name} does not match the filters`),
+            { name: "NotFoundError" },
+          );
+        }
+        device ??= new EmulatorDevice(name, link);
+        device.name = name;
+        return device;
+      } catch (error) {
+        if (!keep()) link.close();
+        throw error;
       }
-      device ??= new EmulatorDevice(name, link);
-      device.name = name;
-      return device;
     },
     async getAvailability() {
       return true;

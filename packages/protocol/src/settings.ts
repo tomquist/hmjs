@@ -474,7 +474,12 @@ export function createCloudServerCommand(
   server: number,
 ): FamilyCommand {
   requireSetting("cloudServer", family);
-  checkInt(server, 0, 4, "Server");
+  const allowed = family === "venusMini" ? [0, 1, 2, 3] : [0, 2, 3, 4];
+  if (!allowed.includes(server)) {
+    throw new RangeError(
+      `Server ${server} is not a cloud region of this device (${allowed.join(", ")})`,
+    );
+  }
   return cmd(family === "venusMini" ? 0x2a : 0x02, server);
 }
 
@@ -557,6 +562,11 @@ export function createMeterPowerCommand(
 
 /** Decode the Venus E Mini's meter power (`0x1A`, 19 bytes). */
 export function parseMiniMeterPower(payload: Uint8Array): MeterPower {
+  if (payload.length < 12) {
+    throw new RangeError(
+      `A meter power reply of ${payload.length} bytes is incomplete (12 or more)`,
+    );
+  }
   const v = new DataView(
     payload.buffer,
     payload.byteOffset,
@@ -607,6 +617,18 @@ export interface MeterStatus {
  * powers; the CT003 a longer block with 32-bit powers and the energy
  * counter, which tells the two apart.
  */
+/**
+ * Which status layout a `0x03` payload of `length` bytes is: the CT002's 19
+ * bytes or the CT003's 36 or more; undefined for a cut-off reply.
+ */
+export function meterStatusLayout(
+  length: number,
+): "ct002" | "ct003" | undefined {
+  if (length >= 36) return "ct003";
+  if (length >= 19 && length < 30) return "ct002";
+  return undefined;
+}
+
 export function parseMeterStatus(payload: Uint8Array): MeterStatus {
   const v = new DataView(
     payload.buffer,
@@ -614,7 +636,13 @@ export function parseMeterStatus(payload: Uint8Array): MeterStatus {
     payload.byteLength,
   );
   const has = (o: number, n: number) => o + n <= payload.length;
-  if (payload.length < 30) {
+  const layout = meterStatusLayout(payload.length);
+  if (!layout) {
+    throw new RangeError(
+      `A meter status of ${payload.length} bytes is incomplete (CT002: 19, CT003: 36 or more)`,
+    );
+  }
+  if (layout === "ct002") {
     // CT002: offsets are frame offsets − 4
     const i16 = (o: number) => (has(o, 2) ? v.getInt16(o, true) : 0);
     return {
@@ -623,7 +651,8 @@ export function parseMeterStatus(payload: Uint8Array): MeterStatus {
       total: has(13, 2) ? v.getInt16(13, true) : undefined,
       batteries: payload[16],
       wifiSignal: has(17, 1) ? v.getInt8(17) : undefined,
-      directionMask: payload[18],
+      // 0xFF: no direction set (a fresh meter reports it)
+      directionMask: payload[18] === 0xff ? undefined : payload[18] & 0x07,
       rawPayload: payload.slice(),
     };
   }

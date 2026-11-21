@@ -25,6 +25,7 @@ import {
   createMeterReaderCommand,
   createRestartCommand,
   supportsSetting,
+  meterStatusLayout,
 } from "./settings.js";
 import { decodeFamilyMessage } from "./families.js";
 
@@ -219,6 +220,10 @@ describe("setting commands", () => {
     expect(bytes(createPhaseDetectionCommand("venusMini"))).toEqual([0x20, 1]);
     expect(bytes(createCloudServerCommand("venus3", 2))).toEqual([0x02, 2]);
     expect(bytes(createCloudServerCommand("venusMini", 1))).toEqual([0x2a, 1]);
+    // only the regions each family documents
+    expect(() => createCloudServerCommand("venus3", 1)).toThrow(/region/);
+    expect(() => createCloudServerCommand("jupiter", 1)).toThrow(/region/);
+    expect(() => createCloudServerCommand("venusMini", 4)).toThrow(/region/);
     expect(bytes(createNetworkInfoCommand("jupiter"))).toEqual([0x29, 0]);
     expect(bytes(createNetworkInfoCommand("venus3"))).toEqual([0x24, 0]);
   });
@@ -290,6 +295,23 @@ describe("CT002 / CT003", () => {
     return new Uint8Array(b.slice(4, -1));
   };
 
+  it("reports the CT002 direction mask as the setter takes it", () => {
+    const p = payloadOf(
+      "73182303 7c 000000000000 6f00 22ff 4d01 de00 01 00 d0 ff 39",
+    );
+    p[18] = 0x05;
+    expect(parseMeterStatus(p).directionMask).toBe(0x05);
+  });
+
+  it("refuses a cut-off status instead of reporting zero watts", () => {
+    expect(meterStatusLayout(0)).toBeUndefined();
+    expect(meterStatusLayout(19)).toBe("ct002");
+    expect(meterStatusLayout(32)).toBeUndefined();
+    expect(meterStatusLayout(36)).toBe("ct003");
+    expect(() => parseMeterStatus(new Uint8Array(4))).toThrow(/incomplete/);
+    expect(() => parseMiniMeterPower(new Uint8Array(2))).toThrow(/incomplete/);
+  });
+
   it("decodes the CT002 status with 16-bit powers", () => {
     expect(
       parseMeterStatus(
@@ -303,7 +325,7 @@ describe("CT002 / CT003", () => {
       total: 222,
       batteries: 0,
       wifiSignal: -48,
-      directionMask: 0xff,
+      directionMask: undefined, // 0xff: none set
     });
   });
 

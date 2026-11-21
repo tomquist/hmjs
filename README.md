@@ -75,6 +75,10 @@ without the hardware and serves its Bluetooth over WebSocket. Start it with
 then finds the emulated device instead of opening the browser's picker.
 This works in any browser, without Web Bluetooth or a Bluetooth adapter:
 
+Browsers let the hosted (HTTPS) demo open `ws://` only to the local
+computer (`localhost`, `127.0.0.1`); an emulator on another machine needs
+`wss://` there, or a demo served over plain HTTP (`npm start`).
+
 ```bash
 marsemu venus3 CONTROL.bin BMS.bin --realtime --ble-ws 7101
 # https://tomquist.github.io/hmjs/?emulator=ws://localhost:7101/
@@ -126,7 +130,7 @@ known about each:
 | Grid, PV and battery (`getSystemInfo`) | | | | | ✓ | |
 | Grid and inverter (`getInverterInfo`) | | | ✓ | | | |
 | Device clock (`getDeviceTime`) | | | ✓ | | ✓ | |
-| Wi-Fi network / IP (`getWifiSsid` / `getNetworkInfo`) | | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ | / ✓ | |
+| Wi-Fi network / IP (`getWifiSsid` / `getNetworkInfo`) | / ✓ | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ | / ✓ | ✓ / |
 | Depth of discharge (`setDepthOfDischarge`) | ✓ | | ✓ | ✓ | ✓ | |
 | Status LED (`setStatusLed`) | | | ✓ | ✓ | | |
 | Working mode (`setWorkingMode`) | | ✓ | ✓ | ✓ | ✓ | |
@@ -141,18 +145,22 @@ known about each:
 | Power limits, UPS power, anti-reverse, restart, meter power | | | | ✓ | | |
 | Wi-Fi signal, module version, packs, CT status, rated power (`getWifiSignal`, …) | ✓ | | | | | |
 | Region, meter type, surplus feed-in, factory reset | ✓ | | | | | factory reset |
-| Meter direction, reader settings, zero calibration, phase readings | | | | | | ✓ |
+| Meter direction, zero calibration, phase readings (CT002); reader settings (CT003) | | | | | | ✓ |
 
 ```typescript
 const manager = new BLEDeviceManager();
 await manager.connect();                 // the picker lists every Marstek device
 const family = await manager.detectFamily(); // e.g. "venus3"
 
-const status = await manager.getStatus();
-console.log(status.soc, status.acPower);
-
-const battery = await manager.getBatteryInfo();
-console.log(battery.cellVoltages);       // mV
+if (family === "meter") {
+  const meter = await manager.getStatus();
+  if ("phases" in meter) console.log(meter.phases, meter.total); // W
+} else if (family && family !== "b2500") {
+  const status = await manager.getStatus();
+  if ("soc" in status) console.log(status.soc);
+  const battery = await manager.getBatteryInfo();
+  console.log(battery.cellVoltages);     // mV
+}
 ```
 
 The B2500-only methods (timers, MQTT, charge mode, …) refuse to run on other
@@ -201,7 +209,7 @@ npm run lint
 
 ## Browser Compatibility
 
-Requires a browser with Web Bluetooth API support (Chrome, Edge, Opera on desktop; limited mobile support). With an emulated device (`?emulator=`), any browser with WebSocket works.
+Requires a browser with Web Bluetooth API support (Chrome, Edge, Opera on desktop; limited mobile support). With an emulated device (`?emulator=`), any browser with WebSocket works (`wss://` for an emulator on another machine, from the hosted demo).
 
 ## License
 

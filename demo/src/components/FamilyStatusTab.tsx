@@ -3,6 +3,7 @@ import type { BLEDeviceManager } from "@tomquist/hmjs-ble";
 import {
   DEVICE_FAMILIES,
   DeviceFamily,
+  MeterVariant,
   MiniSlotAction,
   Setting,
   WorkingMode,
@@ -89,15 +90,26 @@ const formatDateTime = (d: Record<string, number>): string =>
   `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")} ` +
   `${String(d.hour).padStart(2, "0")}:${String(d.minute).padStart(2, "0")}:${String(d.second).padStart(2, "0")}`;
 
-/** Flatten a decoded reply into label/value rows, skipping the raw bytes. */
-export const toRows = (value: unknown, prefix = "", key = ""): Row[] => {
+/**
+ * Flatten a decoded reply into label/value rows, skipping the raw bytes.
+ * List entries are numbered from `first` (0 for schedule slots, as the
+ * slot form takes them).
+ */
+export const toRows = (
+  value: unknown,
+  prefix = "",
+  key = "",
+  first = 1,
+): Row[] => {
   if (value === null || value === undefined) return [];
   if (value instanceof Uint8Array) return [];
   if (Array.isArray(value)) {
     if (value.every((v) => typeof v !== "object")) {
       return value.length ? [[prefix, value.join(", ") + unit(key)]] : [];
     }
-    return value.flatMap((v, i) => toRows(v, `${prefix} ${i + 1}`.trim()));
+    return value.flatMap((v, i) =>
+      toRows(v, `${prefix} ${i + first}`.trim(), "", first),
+    );
   }
   if (typeof value === "object") {
     const obj = value as Record<string, unknown>;
@@ -112,7 +124,12 @@ export const toRows = (value: unknown, prefix = "", key = ""): Row[] => {
     return Object.entries(obj)
       .filter(([k]) => k !== "rawPayload")
       .flatMap(([k, v]) =>
-        toRows(v, prefix ? `${prefix} ${label(k).toLowerCase()}` : label(k), k),
+        toRows(
+          v,
+          prefix ? `${prefix} ${label(k).toLowerCase()}` : label(k),
+          k,
+          first,
+        ),
       );
   }
   return [[prefix || "value", String(value) + unit(key)]];
@@ -122,6 +139,10 @@ interface Reading {
   title: string;
   supported: (family: DeviceFamily) => boolean;
   read: (m: BLEDeviceManager) => Promise<unknown>;
+  /** Only on this meter */
+  meter?: MeterVariant;
+  /** Numbers its entries from 0, as the slot form takes them */
+  slots?: boolean;
 }
 
 const only =
@@ -154,11 +175,13 @@ const READINGS: Reading[] = [
     title: "Time periods",
     supported: (f) => supportsSetting(f, "timePeriods"),
     read: (m) => m.getTimePeriods(),
+    slots: true,
   },
   {
     title: "Schedule",
     supported: only("venusMini"),
     read: (m) => m.getMiniSchedule(),
+    slots: true,
   },
   {
     title: "Meter power",
@@ -169,6 +192,7 @@ const READINGS: Reading[] = [
     title: "Meter phases",
     supported: only("meter"),
     read: (m) => m.getMeterPhaseReadings(),
+    meter: "ct002",
   },
   {
     title: "Wi-Fi signal",
@@ -255,18 +279,31 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
     gridCharge: "0",
   });
   const v = (k: string) => values[k] ?? "";
+  /** The number in field `k`; an empty field is an error, not 0. */
+  const num = (k: string): number => {
+    if (!v(k).trim()) throw new Error("Enter a value first");
+    const n = Number(v(k));
+    if (!Number.isFinite(n)) throw new Error(`"${v(k)}" is not a number`);
+    return n;
+  };
+  const meter = manager?.getMeterVariant();
   const set = (k: string) => (e: { target: { value: string } }) =>
     setValues((prev) => ({ ...prev, [k]: e.target.value }));
   const can = (s: Setting) => supportsSetting(family, s);
   const disabled = !isConnected || !manager;
 
-  const readings = READINGS.filter((r) => r.supported(family));
+  const readings = READINGS.filter(
+    (r) => r.supported(family) && (!r.meter || r.meter === meter),
+  );
 
   const run = async (reading: Reading) => {
     if (!manager) return;
     try {
       const data = await reading.read(manager);
-      setResults((prev) => ({ ...prev, [reading.title]: toRows(data) }));
+      setResults((prev) => ({
+        ...prev,
+        [reading.title]: toRows(data, "", "", reading.slots ? 0 : 1),
+      }));
       setErrors((prev) => ({ ...prev, [reading.title]: "" }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -331,8 +368,8 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
           onChange={set(key)}
         />
         <button
-          disabled={disabled}
-          onClick={() => act(title, (m) => fn(m, Number(v(key))))}
+          disabled={disabled || !v(key).trim()}
+          onClick={() => act(title, (m) => fn(m, num(key)))}
         >
           Set
         </button>
@@ -459,15 +496,15 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
                     enabled: v("slotEnabled") === "1",
                     start: parseTime(v("slotStart")),
                     end: parseTime(v("slotEnd")),
-                    weekdays: Number(v("slotDays")),
-                    power: Number(v("slotPower")),
+                    weekdays: num("slotDays"),
+                    power: num("slotPower"),
                   };
                   return can("miniSchedule")
-                    ? m.setMiniScheduleSlot(Number(v("slot")), {
+                    ? m.setMiniScheduleSlot(num("slot"), {
                         ...base,
                         action: v("slotAction") as MiniSlotAction,
                       })
-                    : m.setTimePeriod(Number(v("slot")), base);
+                    : m.setTimePeriod(num("slot"), base);
                 })
               }
             >
@@ -536,9 +573,7 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
               <button
                 disabled={disabled}
                 onClick={() =>
-                  act("Peak shaving", (m) =>
-                    m.setPeakShaving(Number(v("peak"))),
-                  )
+                  act("Peak shaving", (m) => m.setPeakShaving(num("peak")))
                 }
               >
                 Set
@@ -567,8 +602,8 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
                 onClick={() =>
                   act("Anti-reverse", (m) =>
                     m.setAntiReverse(
-                      Number(v("antiReverse")) > 0,
-                      Number(v("antiReverse")),
+                      num("antiReverse") > 0,
+                      num("antiReverse"),
                     ),
                   )
                 }
@@ -650,8 +685,8 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
                   act("Local API", (m) =>
                     m.setLocalApi(
                       v("apiEnabled") === "1",
-                      Number(v("apiPort")),
-                      Number(v("apiRemotePort")),
+                      num("apiPort"),
+                      num("apiRemotePort"),
                     ),
                   )
                 }
@@ -752,36 +787,38 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
       {family === "meter" && (
         <div className="config-section">
           <h3>Settings</h3>
+          {meter === "ct002" && (
+            <div className="form-group">
+              <label htmlFor="family-direction">
+                Direction mask (CT002; bit 0-2 = phase A-C)
+              </label>
+              <input
+                id="family-direction"
+                type="number"
+                value={v("direction")}
+                onChange={set("direction")}
+              />
+              <button
+                disabled={disabled}
+                onClick={() =>
+                  act("Direction", (m) => m.setMeterDirection(num("direction")))
+                }
+              >
+                Set
+              </button>
+            </div>
+          )}
           <div className="form-group">
-            <label htmlFor="family-direction">
-              Direction mask (CT002; bit 0-2 = phase A-C)
-            </label>
-            <input
-              id="family-direction"
-              type="number"
-              value={v("direction")}
-              onChange={set("direction")}
-            />
-            <button
-              disabled={disabled}
-              onClick={() =>
-                act("Direction", (m) =>
-                  m.setMeterDirection(Number(v("direction"))),
-                )
-              }
-            >
-              Set
-            </button>
-          </div>
-          <div className="form-group">
-            <button
-              disabled={disabled}
-              onClick={() =>
-                act("Zero calibration", (m) => m.calibrateMeterZero())
-              }
-            >
-              Zero-point calibration (CT002)
-            </button>
+            {meter === "ct002" && (
+              <button
+                disabled={disabled}
+                onClick={() =>
+                  act("Zero calibration", (m) => m.calibrateMeterZero())
+                }
+              >
+                Zero-point calibration (CT002)
+              </button>
+            )}
             <button
               disabled={disabled}
               onClick={() => act("Restart", (m) => m.restartDevice())}

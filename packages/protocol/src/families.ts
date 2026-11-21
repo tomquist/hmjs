@@ -18,6 +18,7 @@
 import {
   parseMeterPhaseReply,
   parseMeterStatus,
+  meterStatusLayout,
   parseMiniMeterPower,
   parseMiniSchedule,
   parseTimePeriods,
@@ -132,7 +133,7 @@ export function detectDeviceFamily(device: {
  * commands mean the same on both.
  */
 export const MARSTEK_COMMANDS = {
-  /** Status block; layout per family (send with payload `0x01`) */
+  /** Status block; layout per family (no payload; the meters take `0x01`) */
   RUNTIME_INFO: 0x03,
   /** `type=…,id=…,mac=…` plus versions; send with payload `0x01` */
   DEVICE_INFO: 0x04,
@@ -159,6 +160,8 @@ export const MARSTEK_COMMANDS = {
 const JUPITER_NETWORK_INFO = 0x29;
 /** The Venus E Mini's meter power query. */
 const MINI_METER_POWER = 0x1a;
+/** Phases, total, phase and meter type: what a whole `0x1A` reply holds */
+const MINI_METER_POWER_LENGTH = 12;
 
 /**
  * Commands that make the Wi-Fi module download and flash new firmware.
@@ -176,16 +179,52 @@ export const DANGEROUS_COMMANDS: Readonly<
   b2500: [0x24],
 };
 
-/** Throw if `command` would start a firmware update on `family`. */
+/**
+ * Refused while the device's family is unknown: every family's update
+ * command. None of them means anything else on a B2500, which an unknown
+ * device is treated as.
+ */
+export const UNKNOWN_FAMILY_REFUSED: readonly number[] = [
+  ...new Set(Object.values(DANGEROUS_COMMANDS).flat()),
+];
+
+/**
+ * Throw if `command` is not a byte, or would start a firmware update on
+ * `family` (on any family while it is unknown).
+ */
 export function assertCommandAllowed(
   family: DeviceFamily | undefined,
   command: number,
 ): void {
-  if (family && DANGEROUS_COMMANDS[family]?.includes(command)) {
+  if (!Number.isInteger(command) || command < 0 || command > 0xff) {
+    throw new RangeError(`Command must be a byte (0-255), got ${command}`);
+  }
+  const refused = family ? DANGEROUS_COMMANDS[family] : UNKNOWN_FAMILY_REFUSED;
+  if (refused?.includes(command)) {
     throw new Error(
-      `Command 0x${command.toString(16).padStart(2, "0")} starts a Wi-Fi module firmware update on this device and is not sent.`,
+      `Command 0x${command.toString(16).padStart(2, "0")} starts a Wi-Fi module firmware update on ${family ? "this device" : "some Marstek devices, and this device's family is not known yet"}; it is not sent.`,
     );
   }
+}
+
+/** Which meter a CT002/CT003 is, from its Bluetooth name or device type. */
+export type MeterVariant = "ct002" | "ct003";
+
+/**
+ * The meter variant: `MST-TPM_` / `HME-4` is a CT002 (current clamps),
+ * `MST-SMR_` / `HME-3` a CT003 (smart meter reader). Undefined otherwise.
+ */
+export function detectMeterVariant(info: {
+  name?: string | null;
+  type?: string | null;
+}): MeterVariant | undefined {
+  const name = info.name ?? "";
+  if (name.startsWith("MST-TPM_")) return "ct002";
+  if (name.startsWith("MST-SMR_")) return "ct003";
+  const type = (info.type ?? "").toUpperCase();
+  if (type.startsWith("HME-4") || type.startsWith("TPM")) return "ct002";
+  if (type.startsWith("HME-3") || type.startsWith("SMR")) return "ct003";
+  return undefined;
 }
 
 /** Which families support which shared command. */
@@ -216,6 +255,18 @@ export function familySupports(
 /** Payload of a frame: everything between the 4-byte header and the checksum. */
 export function framePayload(frame: Uint8Array): Uint8Array {
   return frame.subarray(4, Math.max(4, frame.length - 1));
+}
+
+/**
+ * Whether a frame is whole: its length byte matches its length (modulo 256,
+ * for the long Venus replies) and its last byte is the XOR of the others.
+ * (Some B2500 replies fail both; their decoder copes.)
+ */
+export function frameIsValid(frame: Uint8Array): boolean {
+  if (frame.length < 5 || frame[1] !== (frame.length & 0xff)) return false;
+  let x = 0;
+  for (let i = 0; i < frame.length - 1; i++) x ^= frame[i];
+  return x === frame[frame.length - 1];
 }
 
 class Reader {
@@ -790,6 +841,7 @@ export function decodeFamilyMessage(
   frame: Uint8Array,
 ): FamilyMessage | null {
   if (frame.length < 5 || frame[0] !== 0x73 || frame[2] !== 0x23) return null;
+  if (!frameIsValid(frame)) return null;
   const command = frame[3];
   const payload = framePayload(frame);
   const C = MARSTEK_COMMANDS;
@@ -860,7 +912,7 @@ export function decodeFamilyMessage(
         };
       break;
     case "meter":
-      if (command === C.RUNTIME_INFO)
+      if (command === C.RUNTIME_INFO && meterStatusLayout(payload.length))
         return {
           kind: "meterStatus",
           command,
@@ -886,7 +938,11 @@ export function decodeFamilyMessage(
       data: parseTimePeriods(family, payload),
     };
   }
-  if (command === MINI_METER_POWER && family === "venusMini") {
+  if (
+    command === MINI_METER_POWER &&
+    family === "venusMini" &&
+    payload.length >= MINI_METER_POWER_LENGTH
+  ) {
     return { kind: "meterPower", command, data: parseMiniMeterPower(payload) };
   }
   if (command === JUPITER_NETWORK_INFO && family === "jupiter") {

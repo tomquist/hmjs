@@ -44,6 +44,7 @@ import {
   createMeterZeroCalibrationCommand,
   decodeFamilyMessage,
   detectDeviceFamily,
+  detectMeterVariant,
   familySupports,
   parseKeyValuePayload,
 } from "@tomquist/hmjs-protocol";
@@ -66,6 +67,7 @@ import type {
   Venus3RuntimeInfo,
   VenusRuntimeInfo,
   VenusMiniRuntimeInfo,
+  MeterVariant,
 } from "@tomquist/hmjs-protocol";
 import {
   BLEManagerOptions,
@@ -114,6 +116,20 @@ class BLEDeviceManager {
 
   // Family of the connected device; B2500 when unknown, as before
   private family: DeviceFamily | undefined = undefined;
+  // CT002 or CT003, for a meter
+  private meterVariant: MeterVariant | undefined = undefined;
+
+  // Every connect() and disconnect() starts a new generation; a reconnect
+  // scheduled under an older one stands down instead of taking over.
+  private generation = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Reads waiting for their reply; rejected when the connection ends
+  private pendingReads = new Set<(error: Error) => void>();
+  // Internal notification listeners (reply matching), apart from the public
+  // rawData event, whose listeners get a copy of each frame
+  private frameListeners = new Set<(frame: Uint8Array) => void>();
+  // Whether the caller chose the name prefix; otherwise it follows the type
+  private readonly explicitPrefix: boolean;
 
   // Options with defaults
   private options: Required<Omit<BLEManagerOptions, "bluetooth">> & {
@@ -188,6 +204,7 @@ class BLEDeviceManager {
    * @param options Configuration options
    */
   constructor(options: BLEManagerOptions = {}) {
+    this.explicitPrefix = options.deviceNamePrefix !== undefined;
     // Set default options
     this.options = {
       autoReconnect:
@@ -339,6 +356,12 @@ class BLEDeviceManager {
       ...this.options,
       ...options,
     };
+    if (options.deviceNamePrefix === undefined && !this.explicitPrefix) {
+      // the default follows the type being scanned for: the Tronic firmware
+      // keeps the old one
+      scanOptions.deviceNamePrefix =
+        scanOptions.deviceType === "tronic" ? "HM_" : [...ALL_NAME_PREFIXES];
+    }
 
     const bluetooth = await this.resolveBluetooth(scanOptions.bluetooth);
 
@@ -403,6 +426,8 @@ class BLEDeviceManager {
 
     this.connecting = true;
     this.explicitDisconnect = false;
+    // a reconnect still waiting for its turn would take over this connection
+    this.cancelReconnect();
 
     try {
       // Merge connection options with defaults
@@ -418,9 +443,11 @@ class BLEDeviceManager {
       }
 
       this.device = device;
-      // A new device: forget the previous one's family.
+      // A new device: forget the previous one's family. The name's is
+      // announced once the connection is ready.
       this.family = undefined;
-      this.setFamily(detectDeviceFamily({ name: device.name }));
+      this.meterVariant = detectMeterVariant({ name: device.name });
+      const family = detectDeviceFamily({ name: device.name });
 
       // Set up disconnect listener
       this.device.addEventListener(
@@ -457,6 +484,7 @@ class BLEDeviceManager {
 
       this.connected = true;
       this.connecting = false;
+      this.setFamily(family);
 
       this._triggerEvent("connect", this.device);
       this.log("Connected successfully");
@@ -477,12 +505,22 @@ class BLEDeviceManager {
    * Disconnect from the BLE device
    */
   public disconnect(): void {
+    this.cancelReconnect();
     if (this.device && this.device.gatt && this.device.gatt.connected) {
       this.log("Disconnecting from device...");
       this.explicitDisconnect = true;
       this.device.gatt.disconnect();
     } else {
       this.onDisconnected();
+    }
+  }
+
+  /** Drop a scheduled reconnect, and make one in progress stand down. */
+  private cancelReconnect(): void {
+    this.generation++;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 
@@ -500,6 +538,11 @@ class BLEDeviceManager {
     this.commandCharacteristic = null;
     this.statusCharacteristic = null;
 
+    // Reads waiting for a reply will not get one from this connection
+    for (const cancel of [...this.pendingReads]) {
+      cancel(new Error("Disconnected before the device replied"));
+    }
+
     // Trigger disconnect event
     this._triggerEvent("disconnect");
 
@@ -512,7 +555,12 @@ class BLEDeviceManager {
         `Auto-reconnect is enabled. Attempting to reconnect in ${this.options.reconnectDelay}ms...`,
       );
 
-      setTimeout(async () => {
+      const generation = this.generation;
+      // a newer connect() or disconnect() owns the manager now
+      const superseded = () => generation !== this.generation;
+      this.reconnectTimer = setTimeout(async () => {
+        this.reconnectTimer = null;
+        if (superseded()) return;
         try {
           this.log("Reconnecting...");
           this.connecting = true;
@@ -523,18 +571,20 @@ class BLEDeviceManager {
           // Get primary service (UUID depends on device type)
           const uuids = this.getDeviceUUIDs(this.options.deviceType);
           const service = await server.getPrimaryService(uuids.service);
-
-          this.commandCharacteristic = await service.getCharacteristic(
-            uuids.command,
-          );
-
-          this.statusCharacteristic = await service.getCharacteristic(
-            uuids.status,
-          );
+          const command = await service.getCharacteristic(uuids.command);
+          const status = await service.getCharacteristic(uuids.status);
+          await status.startNotifications();
+          if (superseded()) {
+            this.connecting = false;
+            if (lastDevice !== this.device) lastDevice.gatt?.disconnect();
+            this.log("Reconnect abandoned: another connection took over");
+            return;
+          }
 
           // Setup notification handler
-          await this.statusCharacteristic.startNotifications();
-          this.statusCharacteristic.addEventListener(
+          this.commandCharacteristic = command;
+          this.statusCharacteristic = status;
+          status.addEventListener(
             "characteristicvaluechanged",
             this._handleStatusNotification.bind(this),
           );
@@ -544,9 +594,12 @@ class BLEDeviceManager {
           this.connecting = false;
 
           this._triggerEvent("reconnect", this.device);
+          // the same device: its family again, for listeners that reset it
+          if (this.family) this._triggerEvent("familyDetected", this.family);
           this.log("Reconnected successfully");
         } catch (error) {
           this.connecting = false;
+          if (superseded()) return;
           this.device = null;
           this._triggerEvent("error", error);
           this.log(
@@ -578,8 +631,10 @@ class BLEDeviceManager {
       value.byteLength,
     ).slice();
 
-    // Always emit raw data event for advanced mode
-    this._triggerEvent("rawData", frame);
+    // Always emit raw data event for advanced mode; its listeners get their
+    // own copy, so what they do with it cannot touch the decoding below
+    this._triggerEvent("rawData", frame.slice());
+    for (const listener of [...this.frameListeners]) listener(frame);
 
     // Devices other than the B2500 give the command numbers other meanings,
     // so their replies are decoded with the family's own layout.
@@ -587,7 +642,7 @@ class BLEDeviceManager {
       const msg = decodeFamilyMessage(this.family, frame);
       if (msg) {
         if (msg.kind === "deviceInfo") {
-          this.setFamily(detectDeviceFamily({ type: msg.data.type }));
+          this.noteDeviceType(msg.data.type);
           this._triggerEvent("deviceInfo", msg.data);
         }
         this._triggerEvent("familyMessage", msg);
@@ -604,7 +659,7 @@ class BLEDeviceManager {
           this._triggerEvent("runtimeInfo", msg.data);
           break;
         case COMMAND_TYPES.DEVICE_INFO:
-          this.setFamily(detectDeviceFamily({ type: msg.data.type }));
+          this.noteDeviceType(msg.data.type);
           this._triggerEvent("deviceInfo", msg.data);
           if (this.family && this.family !== "b2500") {
             this._triggerEvent("familyMessage", {
@@ -1039,6 +1094,77 @@ class BLEDeviceManager {
     }
   }
 
+  /** The device type from its device info: family, and a meter's variant. */
+  private noteDeviceType(type: string | undefined): void {
+    this.setFamily(detectDeviceFamily({ type }));
+    this.meterVariant ??= detectMeterVariant({ type });
+  }
+
+  /**
+   * CT002 or CT003, for a connected meter: from its Bluetooth name
+   * (`MST-TPM_`, `MST-SMR_`) or its device type (`HME-4`, `HME-3`).
+   */
+  public getMeterVariant(): MeterVariant | undefined {
+    return this.family === "meter" ? this.meterVariant : undefined;
+  }
+
+  private requireMeter(variant: MeterVariant, method: string): void {
+    if (this.family !== "meter") {
+      throw new Error(`${method}() is only supported on the meters`);
+    }
+    if (this.meterVariant !== variant) {
+      throw new Error(
+        `${method}() is only supported on the ${variant.toUpperCase()}` +
+          (this.meterVariant
+            ? ` (this is a ${this.meterVariant.toUpperCase()})`
+            : " (which meter this is is not known)"),
+      );
+    }
+  }
+
+  /**
+   * Send `command` and wait for the first notification `accept` turns into
+   * a result (undefined: not the reply). Rejected on timeout, a send error,
+   * a throwing `accept` or the connection ending.
+   */
+  private awaitReply<T>(
+    command: number,
+    payload: Uint8Array | number[] | null,
+    accept: (frame: Uint8Array) => T | undefined,
+    timeout: number,
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const done = () => {
+        this.frameListeners.delete(onFrame);
+        this.pendingReads.delete(cancel);
+        clearTimeout(timeoutId);
+      };
+      const cancel = (error: unknown) => {
+        done();
+        reject(error);
+      };
+      const onFrame = (frame: Uint8Array) => {
+        let result: T | undefined;
+        try {
+          result = accept(frame);
+        } catch (error) {
+          cancel(error);
+          return;
+        }
+        if (result === undefined) return;
+        done();
+        resolve(result);
+      };
+      const timeoutId = setTimeout(
+        () => cancel(new Error("Command timed out")),
+        timeout,
+      );
+      this.frameListeners.add(onFrame);
+      this.pendingReads.add(cancel);
+      this.sendCommand(command, payload).catch(cancel);
+    });
+  }
+
   /**
    * Family of the connected device, from its Bluetooth name or, once known,
    * its device type. `undefined` for unknown devices, which are treated as a
@@ -1058,7 +1184,7 @@ class BLEDeviceManager {
     timeout?: number;
   }): Promise<DeviceFamily | undefined> {
     const info = await this.getDeviceInfo(options);
-    this.setFamily(detectDeviceFamily({ type: info.type }));
+    this.noteDeviceType(info.type);
     return this.family;
   }
 
@@ -1107,28 +1233,15 @@ class BLEDeviceManager {
     if (!family || family === "b2500") {
       throw new Error("request() is for devices other than the B2500");
     }
-    return new Promise((resolve, reject) => {
-      const handler = (frame: Uint8Array) => {
-        if (frame.length < 5 || frame[0] !== 0x73 || frame[3] !== command) {
-          return;
-        }
-        const msg = decodeFamilyMessage(family, frame);
-        if (!msg) return;
-        this.off("rawData", handler as EventCallback);
-        clearTimeout(timeoutId);
-        resolve(msg);
-      };
-      const timeoutId = setTimeout(() => {
-        this.off("rawData", handler as EventCallback);
-        reject(new Error("Command timed out"));
-      }, timeout);
-      this.on("rawData", handler);
-      this.sendCommand(command, payload).catch((error) => {
-        this.off("rawData", handler as EventCallback);
-        clearTimeout(timeoutId);
-        reject(error);
-      });
-    });
+    return this.awaitReply(
+      command,
+      payload,
+      (frame) =>
+        frame.length >= 5 && frame[0] === 0x73 && frame[3] === command
+          ? (decodeFamilyMessage(family, frame) ?? undefined)
+          : undefined,
+      timeout,
+    );
   }
 
   private async requestKind<K extends keyof FamilyData>(
@@ -1198,10 +1311,14 @@ class BLEDeviceManager {
     return this.requestKind(MARSTEK_COMMANDS.GET_DATETIME, "dateTime");
   }
 
-  /** The Wi-Fi network the device is configured for: Venus (`0x08`). */
+  /** The Wi-Fi network the device is configured for: Venus, CT002/CT003 (`0x08`). */
   public async getWifiSsid(): Promise<string> {
     this.requireFamily("GET_WIFI_SSID", "getWifiSsid");
-    return this.requestKind(MARSTEK_COMMANDS.GET_WIFI_SSID, "wifiSsid");
+    return this.requestKind(
+      MARSTEK_COMMANDS.GET_WIFI_SSID,
+      "wifiSsid",
+      this.family === "meter" ? [0x01] : null,
+    );
   }
 
   /** IP address, gateway, netmask and DNS: every Venus, the Mini and the Jupiter. */
@@ -1258,30 +1375,15 @@ class BLEDeviceManager {
         ),
       );
     }
-    return new Promise((resolve, reject) => {
-      const handler = (frame: Uint8Array) => {
-        if (frame.length < 4 || frame[0] !== 0x73 || frame[3] !== command) {
-          return;
-        }
-        this.off("rawData", handler as EventCallback);
-        clearTimeout(timeoutId);
-        try {
-          resolve(parse(frame));
-        } catch (error) {
-          reject(error);
-        }
-      };
-      const timeoutId = setTimeout(() => {
-        this.off("rawData", handler as EventCallback);
-        reject(new Error("Command timed out"));
-      }, timeout);
-      this.on("rawData", handler);
-      this.sendCommand(command, payload).catch((error) => {
-        this.off("rawData", handler as EventCallback);
-        clearTimeout(timeoutId);
-        reject(error);
-      });
-    });
+    return this.awaitReply(
+      command,
+      payload,
+      (frame) =>
+        frame.length >= 4 && frame[0] === 0x73 && frame[3] === command
+          ? parse(frame)
+          : undefined,
+      timeout,
+    );
   }
 
   /** B2500: Wi-Fi signal in dBm and the SSID (`0x09`). */
@@ -1372,11 +1474,7 @@ class BLEDeviceManager {
 
   /** CT002: voltage, voltage phase angles and active power per phase. */
   public async getMeterPhaseReadings(): Promise<MeterPhaseReadings> {
-    if (this.family !== "meter") {
-      throw new Error(
-        "getMeterPhaseReadings() is only supported on the meters",
-      );
-    }
+    this.requireMeter("ct002", "getMeterPhaseReadings");
     const out: MeterPhaseReadings = {};
     for (const c of [0x13, 0x15, 0x16]) {
       const msg = await this.request(c, [0x01]);
@@ -1390,9 +1488,7 @@ class BLEDeviceManager {
    * `createMeterDirectionCommand` for the polarity).
    */
   public async setMeterDirection(mask: number): Promise<void> {
-    if (this.family !== "meter") {
-      throw new Error("setMeterDirection() is only supported on the meters");
-    }
+    this.requireMeter("ct002", "setMeterDirection");
     await this.sendFamilyCommand(createMeterDirectionCommand(mask));
   }
 
@@ -1400,9 +1496,7 @@ class BLEDeviceManager {
   public async setMeterReader(
     reader: Parameters<typeof createMeterReaderCommand>[0],
   ): Promise<void> {
-    if (this.family !== "meter") {
-      throw new Error("setMeterReader() is only supported on the meters");
-    }
+    this.requireMeter("ct003", "setMeterReader");
     await this.sendFamilyCommand(createMeterReaderCommand(reader), {
       sendTwice: false,
     });
@@ -1410,9 +1504,7 @@ class BLEDeviceManager {
 
   /** CT002: zero-point calibration. */
   public async calibrateMeterZero(): Promise<void> {
-    if (this.family !== "meter") {
-      throw new Error("calibrateMeterZero() is only supported on the meters");
-    }
+    this.requireMeter("ct002", "calibrateMeterZero");
     await this.sendFamilyCommand(createMeterZeroCalibrationCommand(), {
       sendTwice: false,
     });

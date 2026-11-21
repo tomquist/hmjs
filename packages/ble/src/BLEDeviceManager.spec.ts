@@ -108,6 +108,24 @@ describe("BLEDeviceManager", () => {
       return manager;
     };
 
+    /** A frame with its length byte and checksum, as the device sends it. */
+    const frameOf = (command: number, payload: number[]): Uint8Array => {
+      const f = new Uint8Array(5 + payload.length);
+      f.set([0x73, f.length, 0x23, command, ...payload]);
+      f[f.length - 1] = f.subarray(0, -1).reduce((a, b) => a ^ b, 0);
+      return f;
+    };
+
+    /** Deliver `frame` as a notification on the status characteristic. */
+    const notify = (manager: BLEDeviceManager, frame: Uint8Array) => {
+      const m = manager as unknown as {
+        statusCharacteristic: unknown;
+        _handleStatusNotification: (e: unknown) => void;
+      };
+      m.statusCharacteristic = { value: new DataView(frame.slice().buffer) };
+      m._handleStatusNotification({});
+    };
+
     it("offers every Marstek device in the picker by default", async () => {
       const requestDevice = jest
         .fn()
@@ -210,15 +228,12 @@ describe("BLEDeviceManager", () => {
 
     it("resolves a request with the decoded reply", async () => {
       const manager = connected("venusMini");
+      // what a rawData listener does with its frame cannot touch the reply
+      manager.on("rawData", (f: Uint8Array) => f.fill(0));
       const reply = manager.request(0x24);
       const text = "ip:10.0.0.2,gate:10.0.0.1,mask:255.0.0.0,dns:10.0.0.1";
-      const frame = new Uint8Array(5 + text.length);
-      frame.set([0x73, frame.length, 0x23, 0x24]);
-      frame.set(new TextEncoder().encode(text), 4);
       await Promise.resolve();
-      (
-        manager as unknown as { _triggerEvent: (e: string, f: unknown) => void }
-      )._triggerEvent("rawData", frame);
+      notify(manager, frameOf(0x24, [...new TextEncoder().encode(text)]));
       await expect(reply).resolves.toEqual({
         kind: "networkInfo",
         command: 0x24,
@@ -229,6 +244,82 @@ describe("BLEDeviceManager", () => {
           dns: "10.0.0.1",
         },
       });
+    });
+
+    it("rejects a read whose connection ends before the reply", async () => {
+      const manager = connected("venusMini");
+      const reply = manager.request(0x24);
+      await Promise.resolve();
+      (manager as unknown as { onDisconnected: () => void }).onDisconnected();
+      await expect(reply).rejects.toThrow(/Disconnected/);
+    });
+
+    it("sends the meters' SSID query with its payload", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      const manager = connected("meter", write);
+      const ssid = manager.getWifiSsid();
+      await Promise.resolve();
+      expect(Array.from(write.mock.calls[0][0] as Uint8Array)).toEqual([
+        0x73, 0x06, 0x23, 0x08, 0x01, 0x5f,
+      ]);
+      notify(manager, frameOf(0x08, [...new TextEncoder().encode("Home")]));
+      await expect(ssid).resolves.toBe("Home");
+    });
+
+    it("sends CT002 and CT003 commands only to that meter", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      const manager = connected("meter", write);
+      const internals = manager as unknown as { meterVariant?: string };
+      await expect(manager.calibrateMeterZero()).rejects.toThrow(/not known/);
+      internals.meterVariant = "ct003";
+      await expect(manager.setMeterDirection(1)).rejects.toThrow(/CT002/);
+      await expect(manager.calibrateMeterZero()).rejects.toThrow(/CT002/);
+      internals.meterVariant = "ct002";
+      await expect(
+        manager.setMeterReader({
+          interface: 1,
+          serialCode: 0,
+          protocol: 1,
+          meterNumber: 1,
+        }),
+      ).rejects.toThrow(/CT003/);
+      expect(write).not.toHaveBeenCalled();
+      await manager.calibrateMeterZero();
+      expect(write).toHaveBeenCalled();
+    });
+
+    it("drops a pending reconnect when the caller disconnects", async () => {
+      const gattConnect = jest.fn().mockRejectedValue(new Error("no"));
+      const manager = new BLEDeviceManager({
+        logger: () => {},
+        reconnectDelay: 10,
+      });
+      const internals = manager as unknown as {
+        connected: boolean;
+        device: unknown;
+        onDisconnected: () => void;
+      };
+      internals.connected = true;
+      internals.device = { gatt: { connect: gattConnect, connected: false } };
+      internals.onDisconnected(); // the device went away: reconnect scheduled
+      manager.disconnect(); // the caller is done with it
+      await new Promise((r) => setTimeout(r, 50));
+      expect(gattConnect).not.toHaveBeenCalled();
+    });
+
+    it("scans for the Tronic name after setDeviceType", async () => {
+      const requestDevice = jest
+        .fn()
+        .mockRejectedValue(new Error("cancelled by test"));
+      const manager = new BLEDeviceManager({
+        logger: () => {},
+        bluetooth: { requestDevice } as unknown as Bluetooth,
+      });
+      manager.setDeviceType("tronic");
+      await expect(manager.scanForDevices()).rejects.toThrow();
+      expect(requestDevice.mock.calls[0][0].filters).toEqual([
+        { namePrefix: "HM_" },
+      ]);
     });
 
     it("refuses to switch adaptive mode off, which would switch it on", async () => {

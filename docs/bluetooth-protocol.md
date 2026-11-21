@@ -76,7 +76,8 @@ rather than the control board; their protocol is not covered here.
 
 | Cmd | Payload | Reply | Families |
 |---|---|---|---|
-| `0x03` | none | status block, see below | all (decoded: every family but the meters) |
+| `0x03` | none | status block, see below | `venus`, `venus3`, `venusMini`, `jupiter` |
+| `0x03` | `01` | meter status (`meterStatus`), see CT002 / CT003 | `meter` |
 | `0x04` | `0x01` | `type=…,id=…,mac=…` plus versions, as text | all (the Venus E 3.0/A/D only answer with the `0x01`) |
 | `0x05` | `ssid<.,.>password` | — | all |
 | `0x08` | none | name of the configured Wi-Fi network, as text | `venus`, `venus3`, `venusMini` |
@@ -271,8 +272,9 @@ version: the control board runs the power stage itself.
 `0x14` battery (80 bytes) has the Venus E 3.0 layout, with the four
 temperatures at 40 in whole °C.
 
-`0x25` sets the Shelly port and `0x28` the local API port, as on the Venus E
-3.0; their payload format is not mapped, so the library does not offer them.
+`0x28` sets the local API as on the Venus E 3.0 (enable byte, then the port
+as u16 little-endian; see the settings table). `0x25` sets the Shelly port;
+its payload format is not mapped, so the library does not offer it.
 
 ### CT002 / CT003
 

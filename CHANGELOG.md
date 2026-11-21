@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value. It now throws and points to `setTimers`, which is the way back.
 - `setDateTime` now sends UTC with the time-zone offset, as the app does,
   instead of local time with a zero offset.
+- A pending automatic reconnect no longer takes over a newer connection, or
+  reconnects after you disconnected.
 - Restore the demo's reconnect-on-drift path in the remaining eight command
   handlers. They guarded on `_selectedDevice`, which `BLEDeviceManager` does
   not have - its device lives in a private `device` field - so the guard was

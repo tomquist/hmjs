@@ -56,6 +56,8 @@ describe("createEmulatorBluetooth", () => {
         filters: [{ namePrefix: "HM_" }],
       }),
     ).rejects.toThrow(/does not match/);
+    // the socket opened for the failed selection is closed again
+    expect(FakeSocket.last!.readyState).toBe(3);
   });
 
   it("carries the manager's writes and the device's notifications", async () => {

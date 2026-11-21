@@ -17,6 +17,8 @@ import {
   parseVenusRuntimeInfo,
   parseVenusMiniBatteryInfo,
   parseVenusMiniRuntimeInfo,
+  detectMeterVariant,
+  frameIsValid,
 } from "./families.js";
 
 /**
@@ -384,5 +386,42 @@ describe("shared helpers", () => {
     );
     expect(() => assertCommandAllowed("meter", 0x29)).toThrow();
     expect(() => assertCommandAllowed("venus3", 0x17)).not.toThrow();
+  });
+
+  it("refuses every update command while the family is unknown", () => {
+    for (const c of [0x17, 0x24, 0x29]) {
+      expect(() => assertCommandAllowed(undefined, c)).toThrow(/not known/);
+    }
+    expect(() => assertCommandAllowed(undefined, 0x03)).not.toThrow();
+  });
+
+  it("refuses command numbers that are not a byte", () => {
+    // 0x124 would be sent as 0x24
+    for (const c of [0x124, -1, 1.5, NaN]) {
+      expect(() => assertCommandAllowed("b2500", c)).toThrow(RangeError);
+    }
+  });
+
+  it("tells the CT002 from the CT003", () => {
+    expect(detectMeterVariant({ name: "MST-TPM_0002" })).toBe("ct002");
+    expect(detectMeterVariant({ name: "MST-SMR_0002" })).toBe("ct003");
+    expect(detectMeterVariant({ type: "HME-4" })).toBe("ct002");
+    expect(detectMeterVariant({ type: "HME-3" })).toBe("ct003");
+    expect(detectMeterVariant({ name: "MST_VNSE3_0002" })).toBeUndefined();
+  });
+
+  it("decodes only whole frames", () => {
+    const ssid = Uint8Array.from([
+      0x73, 0x0b, 0x23, 0x08, 0x45, 0x6d, 0x75, 0x4e, 0x65, 0x74, 0x51,
+    ]);
+    expect(frameIsValid(ssid)).toBe(true);
+    expect(decodeFamilyMessage("venus3", ssid)?.kind).toBe("wifiSsid");
+    const badSum = ssid.slice();
+    badSum[10] = 0x50;
+    expect(decodeFamilyMessage("venus3", badSum)).toBeNull();
+    const badLength = ssid.slice();
+    badLength[1] = 0x0c;
+    badLength[10] ^= 0x0b ^ 0x0c;
+    expect(decodeFamilyMessage("venus3", badLength)).toBeNull();
   });
 });

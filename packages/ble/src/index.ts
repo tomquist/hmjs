@@ -12,4 +12,8 @@ export { BLEDeviceManager } from "./BLEDeviceManager.js";
 export type { BLEManagerOptions, DeviceType, EventCallback } from "./types.js";
 
 export { createEmulatorBluetooth } from "./emulator.js";
-export type { EmulatorBluetoothOptions } from "./emulator.js";
+export type {
+  EmulatorBluetoothOptions,
+  EmulatorWebSocket,
+  WebSocketCtor,
+} from "./emulator.js";

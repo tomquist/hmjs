@@ -84,10 +84,10 @@ marsemu venus3 CONTROL.bin BMS.bin --realtime --ble-ws 7101
 # https://tomquist.github.io/hmjs/?emulator=ws://localhost:7101/
 ```
 
-The URL can also be entered in the demo's advanced connection options, and
-marsemu's dashboard has an "Open in hmjs" button that does it for you. In
-code, pass `createEmulatorBluetooth(url)` as the manager's `bluetooth`
-option:
+The URL can also be entered in the demo's advanced connection options, or
+in the dialog it shows in a browser without Web Bluetooth, and marsemu's
+dashboard has an "Open in hmjs" button that does it for you. In code, pass
+`createEmulatorBluetooth(url)` as the manager's `bluetooth` option:
 
 ```ts
 import { BLEDeviceManager, createEmulatorBluetooth } from "@tomquist/hmjs-ble";
@@ -96,6 +96,17 @@ const manager = new BLEDeviceManager({
   bluetooth: createEmulatorBluetooth("ws://localhost:7101/"),
 });
 await manager.connect();
+```
+
+This works in Node too, which makes scripts and tests against emulated
+devices possible. Node 22 and newer have a WebSocket built in; on older
+versions, pass one from the [`ws`](https://www.npmjs.com/package/ws)
+package:
+
+```ts
+import WebSocket from "ws";
+
+const bluetooth = createEmulatorBluetooth("ws://localhost:7101/", { WebSocket });
 ```
 
 ### Using the Library

@@ -39,6 +39,9 @@ import {
   createTimePeriodCommand,
   createUpsChargePowerCommand,
   createWorkingModeCommand,
+  createMeterDirectionCommand,
+  createMeterReaderCommand,
+  createMeterZeroCalibrationCommand,
   decodeFamilyMessage,
   detectDeviceFamily,
   familySupports,
@@ -47,6 +50,8 @@ import {
 import type {
   FamilyCommand,
   MeterPower,
+  MeterStatus,
+  MeterPhaseReadings,
   MiniScheduleSlot,
   TimePeriod,
   WorkingMode,
@@ -929,9 +934,14 @@ class BLEDeviceManager {
    */
   public async setAdaptiveMode(enabled: boolean): Promise<void> {
     this.requireB2500("setAdaptiveMode");
-    await this.sendCommand(COMMAND_TYPES.SET_ADAPTIVE_MODE, [
-      enabled ? 0x01 : 0x00,
-    ]);
+    if (!enabled) {
+      // The device switches to adaptive mode whatever the payload says; it
+      // leaves adaptive mode when timers are written.
+      throw new Error(
+        "Adaptive mode cannot be switched off directly: write the timers (setTimers) to return to timer mode.",
+      );
+    }
+    await this.sendCommand(COMMAND_TYPES.SET_ADAPTIVE_MODE, [0x01]);
   }
 
   /**
@@ -1145,12 +1155,13 @@ class BLEDeviceManager {
     | VenusRuntimeInfo
     | VenusMiniRuntimeInfo
     | JupiterRuntimeInfo
+    | MeterStatus
   > {
     this.requireFamily("RUNTIME_INFO", "getStatus");
     if (this.family === "meter") {
-      throw new Error(
-        "getStatus() does not decode this family yet; use request(0x03) for the raw reply.",
-      );
+      return this.requestKind(MARSTEK_COMMANDS.RUNTIME_INFO, "meterStatus", [
+        0x01,
+      ]);
     }
     return this.requestKind(MARSTEK_COMMANDS.RUNTIME_INFO, "runtimeInfo");
   }
@@ -1195,6 +1206,13 @@ class BLEDeviceManager {
 
   /** IP address, gateway, netmask and DNS: every Venus, the Mini and the Jupiter. */
   public async getNetworkInfo(): Promise<NetworkInfo> {
+    if (!this.family || this.family === "b2500") {
+      return this.requestB2500(
+        COMMAND_TYPES.GET_NETWORK_INFO,
+        [0x01],
+        (frame) => this.protocol.parseNetworkInfo(frame),
+      );
+    }
     this.requireFamily("GET_NETWORK_INFO", "getNetworkInfo");
     const c = createNetworkInfoCommand(this.family);
     return this.requestKind(c.command, "networkInfo", Array.from(c.payload));
@@ -1220,6 +1238,184 @@ class BLEDeviceManager {
   /** Turn the status LED on or off (Venus E 3.0/A/D, Venus E Mini). */
   public async setStatusLed(on: boolean): Promise<void> {
     await this.sendFamilyCommand(createStatusLedCommand(this.family, on));
+  }
+
+  /**
+   * Send a B2500 command and decode the reply with the same command number.
+   * Some B2500 replies have no checksum or a wrong length byte, so the
+   * reply is taken as it arrives.
+   */
+  private requestB2500<T>(
+    command: number,
+    payload: number[],
+    parse: (frame: Uint8Array) => T,
+    timeout = 5000,
+  ): Promise<T> {
+    if (this.family && this.family !== "b2500") {
+      return Promise.reject(
+        new Error(
+          `0x${command.toString(16)} is a B2500 command and is not supported on this device (${this.family}).`,
+        ),
+      );
+    }
+    return new Promise((resolve, reject) => {
+      const handler = (frame: Uint8Array) => {
+        if (frame.length < 4 || frame[0] !== 0x73 || frame[3] !== command) {
+          return;
+        }
+        this.off("rawData", handler as EventCallback);
+        clearTimeout(timeoutId);
+        try {
+          resolve(parse(frame));
+        } catch (error) {
+          reject(error);
+        }
+      };
+      const timeoutId = setTimeout(() => {
+        this.off("rawData", handler as EventCallback);
+        reject(new Error("Command timed out"));
+      }, timeout);
+      this.on("rawData", handler);
+      this.sendCommand(command, payload).catch((error) => {
+        this.off("rawData", handler as EventCallback);
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+    });
+  }
+
+  /** B2500: Wi-Fi signal in dBm and the SSID (`0x09`). */
+  public async getWifiSignal(): Promise<{ rssi: number; ssid: string }> {
+    return this.requestB2500(COMMAND_TYPES.GET_WIFI_SIGNAL, [0x01], (f) =>
+      this.protocol.parseWifiSignal(f),
+    );
+  }
+
+  /** B2500: the Wi-Fi module's firmware version (`0x23`). */
+  public async getWifiModuleVersion(): Promise<string> {
+    return this.requestB2500(
+      COMMAND_TYPES.GET_WIFI_MODULE_VERSION,
+      [0x01],
+      (f) => this.protocol.parseWifiModuleVersion(f),
+    );
+  }
+
+  /** B2500: rated output and input power in W (`0x2D`). */
+  public async getRatedPower(): Promise<{
+    outputPower: number;
+    inputPower: number;
+  }> {
+    return this.requestB2500(COMMAND_TYPES.GET_RATED_POWER, [0x01], (f) =>
+      this.protocol.parseRatedPower(f),
+    );
+  }
+
+  /**
+   * B2500: voltage, current and temperatures of the host pack and each
+   * extension pack (`0x2E`; B2500 v2 and v3).
+   */
+  public async getBatteryPacks(): Promise<
+    ReturnType<HMDeviceProtocol["parseBatteryPacks"]>
+  > {
+    return this.requestB2500(COMMAND_TYPES.GET_BATTERY_PACKS, [0x01], (f) =>
+      this.protocol.parseBatteryPacks(f),
+    );
+  }
+
+  /** B2500: CT status with the phase powers (`0x33`). */
+  public async getCtStatus(): Promise<
+    ReturnType<HMDeviceProtocol["parseCtStatus"]>
+  > {
+    return this.requestB2500(COMMAND_TYPES.GET_CT_STATUS, [0x01], (f) =>
+      this.protocol.parseCtStatus(f),
+    );
+  }
+
+  /**
+   * B2500: cloud region (`B2500_REGION`). This moves the device to another
+   * cloud host.
+   */
+  public async setRegion(region: number): Promise<void> {
+    this.requireB2500("setRegion");
+    if (![0, 1, 2].includes(region)) {
+      throw new Error("Region must be B2500_REGION.EU, CHINA or OTHER");
+    }
+    await this.sendCommand(COMMAND_TYPES.SET_REGION, [region]);
+  }
+
+  /**
+   * B2500: the smart meter it reads (`B2500_METER_TYPE`) and the meter's
+   * MAC. Setting a meter restarts the CT search.
+   */
+  public async setMeterType(meterType: number, mac?: string): Promise<void> {
+    this.requireB2500("setMeterType");
+    await this.sendCommand(
+      COMMAND_TYPES.SET_METER_TYPE,
+      this.protocol.createMeterTypePayload(meterType, mac),
+    );
+  }
+
+  /**
+   * Factory reset (B2500 `0x26`, CT002/CT003 `0x06`). The device forgets
+   * its Wi-Fi and settings and has to be set up again.
+   */
+  public async factoryReset(): Promise<void> {
+    if (this.family === "meter") {
+      await this.sendCommand(0x06, [0x01], { sendTwice: false });
+      return;
+    }
+    this.requireB2500("factoryReset");
+    await this.sendCommand(COMMAND_TYPES.FACTORY_RESET, [0x01], {
+      sendTwice: false,
+    });
+  }
+
+  /** CT002: voltage, voltage phase angles and active power per phase. */
+  public async getMeterPhaseReadings(): Promise<MeterPhaseReadings> {
+    if (this.family !== "meter") {
+      throw new Error(
+        "getMeterPhaseReadings() is only supported on the meters",
+      );
+    }
+    const out: MeterPhaseReadings = {};
+    for (const c of [0x13, 0x15, 0x16]) {
+      const msg = await this.request(c, [0x01]);
+      if (msg.kind === "meterPhases") Object.assign(out, msg.data);
+    }
+    return out;
+  }
+
+  /**
+   * CT002: measurement direction mask, bit 0-2 = phase A-C (see
+   * `createMeterDirectionCommand` for the polarity).
+   */
+  public async setMeterDirection(mask: number): Promise<void> {
+    if (this.family !== "meter") {
+      throw new Error("setMeterDirection() is only supported on the meters");
+    }
+    await this.sendFamilyCommand(createMeterDirectionCommand(mask));
+  }
+
+  /** CT003: reader settings. The meter restarts after accepting them. */
+  public async setMeterReader(
+    reader: Parameters<typeof createMeterReaderCommand>[0],
+  ): Promise<void> {
+    if (this.family !== "meter") {
+      throw new Error("setMeterReader() is only supported on the meters");
+    }
+    await this.sendFamilyCommand(createMeterReaderCommand(reader), {
+      sendTwice: false,
+    });
+  }
+
+  /** CT002: zero-point calibration. */
+  public async calibrateMeterZero(): Promise<void> {
+    if (this.family !== "meter") {
+      throw new Error("calibrateMeterZero() is only supported on the meters");
+    }
+    await this.sendFamilyCommand(createMeterZeroCalibrationCommand(), {
+      sendTwice: false,
+    });
   }
 
   private async sendFamilyCommand(
@@ -1295,8 +1491,13 @@ class BLEDeviceManager {
     });
   }
 
-  /** Surplus feed-in on or off (Venus, Jupiter). */
+  /** Surplus feed-in on or off (B2500 v2/v3, Venus, Jupiter). */
   public async setSurplusFeedIn(on: boolean): Promise<void> {
+    if (!this.family || this.family === "b2500") {
+      // B2500 (firmware 226, HMJ 108 or later): the payload is "disabled"
+      await this.sendCommand(COMMAND_TYPES.SET_SURPLUS_FEED_IN, [on ? 0 : 1]);
+      return;
+    }
     await this.sendFamilyCommand(createSurplusFeedInCommand(this.family, on));
   }
 

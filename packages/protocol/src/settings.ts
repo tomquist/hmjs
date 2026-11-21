@@ -65,7 +65,7 @@ export const SETTING_SUPPORT = {
   phaseDetection: ["venus3", "jupiter", "venusMini"],
   clock: ["venus3", "jupiter", "venusMini"],
   cloudServer: ["venus3", "jupiter", "venusMini"],
-  restart: ["venusMini"],
+  restart: ["venusMini", "meter"],
   powerLimits: ["venusMini"],
   upsChargePower: ["venusMini"],
   antiReverse: ["venusMini"],
@@ -478,12 +478,13 @@ export function createCloudServerCommand(
   return cmd(family === "venusMini" ? 0x2a : 0x02, server);
 }
 
-/** Restart the device (Venus E Mini). The connection drops. */
+/** Restart the device (Venus E Mini, CT002/CT003). The connection drops. */
 export function createRestartCommand(
   family: DeviceFamily | undefined,
 ): FamilyCommand {
   requireSetting("restart", family);
-  return cmd(0x2b, 0x01);
+  // the meters restart with 0x09, the B2500's Wi-Fi info query
+  return family === "meter" ? cmd(0x09, 0x01) : cmd(0x2b, 0x01);
 }
 
 /**
@@ -571,4 +572,150 @@ export function parseMiniMeterPower(payload: Uint8Array): MeterPower {
     meterOnline: payload.length > 12 ? payload[12] === 1 : undefined,
     rawPayload: payload.slice(),
   };
+}
+
+// ------------------------------------------------------- CT002 / CT003
+
+/** Status of a CT002 or CT003 meter (`0x03`). */
+export interface MeterStatus {
+  /** Meter firmware version */
+  firmwareVersion?: number;
+  /** Phase A, B and C power in W */
+  phases: [number, number, number];
+  /** Total power in W */
+  total?: number;
+  /** Batteries reading this meter */
+  batteries?: number;
+  /** Wi-Fi signal in dBm */
+  wifiSignal?: number;
+  /** CT002: measurement direction mask, bit 0-2 = phase A-C */
+  directionMask?: number;
+  /** CT003: total energy in kWh (on a DSMR meter: import minus export) */
+  totalEnergy?: number;
+  /** CT003: reader settings (see `createMeterReaderCommand`) */
+  reader?: {
+    interface: number;
+    serialCode: number;
+    protocol: number;
+    meterNumber: number;
+  };
+  rawPayload: Uint8Array;
+}
+
+/**
+ * Decode a meter's status block. The CT002 sends 19 bytes with 16-bit
+ * powers; the CT003 a longer block with 32-bit powers and the energy
+ * counter, which tells the two apart.
+ */
+export function parseMeterStatus(payload: Uint8Array): MeterStatus {
+  const v = new DataView(
+    payload.buffer,
+    payload.byteOffset,
+    payload.byteLength,
+  );
+  const has = (o: number, n: number) => o + n <= payload.length;
+  if (payload.length < 30) {
+    // CT002: offsets are frame offsets − 4
+    const i16 = (o: number) => (has(o, 2) ? v.getInt16(o, true) : 0);
+    return {
+      firmwareVersion: payload[0],
+      phases: [i16(7), i16(9), i16(11)],
+      total: has(13, 2) ? v.getInt16(13, true) : undefined,
+      batteries: payload[16],
+      wifiSignal: has(17, 1) ? v.getInt8(17) : undefined,
+      directionMask: payload[18],
+      rawPayload: payload.slice(),
+    };
+  }
+  const i32 = (o: number) => (has(o, 4) ? v.getInt32(o, true) : 0);
+  const energy = has(5, 8) ? Number(v.getBigInt64(5, true)) : undefined;
+  return {
+    firmwareVersion: payload[0],
+    total: has(1, 4) ? v.getInt32(1, true) : undefined,
+    totalEnergy: energy === undefined ? undefined : Math.round(energy) / 10000,
+    batteries: payload[14],
+    wifiSignal: has(15, 1) ? v.getInt8(15) : undefined,
+    reader: has(16, 4)
+      ? {
+          interface: payload[16],
+          serialCode: payload[17],
+          protocol: payload[18],
+          meterNumber: payload[19],
+        }
+      : undefined,
+    phases: [i32(24), i32(28), i32(32)],
+    rawPayload: payload.slice(),
+  };
+}
+
+/**
+ * CT002 measurement direction (`0x17`): bit 0-2 = phase A-C. On the
+ * emulated HME-4 (firmware 124) a set bit keeps the phase's measured sign
+ * and a cleared bit inverts it; a factory reset restores 7. hm2mqtt
+ * describes the MQTT field the other way round, so check the result on
+ * your meter.
+ */
+export function createMeterDirectionCommand(mask: number): FamilyCommand {
+  checkInt(mask, 0, 7, "Direction mask");
+  return cmd(0x17, mask);
+}
+
+/**
+ * CT003 reader settings (`0x11`): interface (0 infrared head, 1 P1 port),
+ * serial settings code, protocol (0 SML, 1 DSMR) and meter number, as the
+ * app takes them from its meter list. The meter restarts after accepting;
+ * defaults are 1, 0, 1, 100.
+ */
+export function createMeterReaderCommand(reader: {
+  interface: number;
+  serialCode: number;
+  protocol: number;
+  meterNumber: number;
+}): FamilyCommand {
+  checkInt(reader.interface, 0, 1, "Interface");
+  checkInt(reader.serialCode, 0, 255, "Serial settings code");
+  checkInt(reader.protocol, 0, 1, "Protocol");
+  checkInt(reader.meterNumber, 0, 255, "Meter number");
+  return cmd(
+    0x11,
+    reader.interface,
+    reader.serialCode,
+    reader.protocol,
+    reader.meterNumber,
+  );
+}
+
+/** CT002 zero-point calibration (`0x10`). */
+export function createMeterZeroCalibrationCommand(): FamilyCommand {
+  return cmd(0x10, 0x01);
+}
+
+/** CT002 phase measurements (`0x13` voltages, `0x15` angles, `0x16` power). */
+export interface MeterPhaseReadings {
+  /** Phase voltages in V (whole volts) */
+  voltages?: [number, number, number];
+  /** Voltage phase angles AB, CA, BC in degrees */
+  angles?: [number, number, number];
+  /** Active power per phase in W */
+  powers?: [number, number, number];
+}
+
+export function parseMeterPhaseReply(
+  command: number,
+  payload: Uint8Array,
+): MeterPhaseReadings {
+  const v = new DataView(
+    payload.buffer,
+    payload.byteOffset,
+    payload.byteLength,
+  );
+  if (payload.length < 6) return {};
+  const three = (signed: boolean): [number, number, number] =>
+    [0, 2, 4].map((o) =>
+      signed ? v.getInt16(o, true) : v.getUint16(o, true),
+    ) as [number, number, number];
+  if (command === 0x13) return { voltages: three(false) };
+  if (command === 0x15) return { angles: three(false) };
+  if (command === 0x16) return { powers: three(true) };
+  return {};
 }

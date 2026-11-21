@@ -22,6 +22,8 @@ export {
   OUTPUT_CHANNEL,
   DIAGNOSIS_VARIANT,
   DATETIME_YEAR_EPOCH,
+  B2500_REGION,
+  B2500_METER_TYPE,
 } from "./HMDeviceProtocol.js";
 
 // Device families other than the B2500
@@ -97,6 +99,11 @@ export {
   createNetworkInfoCommand,
   createMeterPowerCommand,
   parseMiniMeterPower,
+  parseMeterStatus,
+  parseMeterPhaseReply,
+  createMeterDirectionCommand,
+  createMeterReaderCommand,
+  createMeterZeroCalibrationCommand,
   VENUS_TIME_PERIODS,
   JUPITER_TIME_PERIODS,
   MINI_SCHEDULE_SLOTS,
@@ -109,6 +116,8 @@ export type {
   MiniScheduleSlot,
   MiniSlotAction,
   MeterPower,
+  MeterStatus,
+  MeterPhaseReadings,
 } from "./settings.js";
 
 // Export types
@@ -121,4 +130,5 @@ export type {
   SmartMeterInfo,
   WifiMqttState,
   MQTTConfig,
+  CtTimerDetails,
 } from "./types.js";

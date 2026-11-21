@@ -132,7 +132,7 @@ const only =
 const READINGS: Reading[] = [
   {
     title: "Status",
-    supported: only("venus", "venus3", "venusMini", "jupiter"),
+    supported: only("venus", "venus3", "venusMini", "jupiter", "meter"),
     read: (m) => m.getStatus(),
   },
   {
@@ -166,6 +166,36 @@ const READINGS: Reading[] = [
     read: (m) => m.getMeterPower(),
   },
   {
+    title: "Meter phases",
+    supported: only("meter"),
+    read: (m) => m.getMeterPhaseReadings(),
+  },
+  {
+    title: "Wi-Fi signal",
+    supported: only("b2500"),
+    read: (m) => m.getWifiSignal(),
+  },
+  {
+    title: "Wi-Fi module",
+    supported: only("b2500"),
+    read: async (m) => ({ version: await m.getWifiModuleVersion() }),
+  },
+  {
+    title: "Battery packs",
+    supported: only("b2500"),
+    read: (m) => m.getBatteryPacks(),
+  },
+  {
+    title: "CT status",
+    supported: only("b2500"),
+    read: (m) => m.getCtStatus(),
+  },
+  {
+    title: "Rated power",
+    supported: only("b2500"),
+    read: (m) => m.getRatedPower(),
+  },
+  {
     title: "Device clock",
     supported: (f) => familySupports(f, "GET_DATETIME"),
     read: (m) => m.getDeviceTime(),
@@ -177,7 +207,7 @@ const READINGS: Reading[] = [
   },
   {
     title: "Network",
-    supported: (f) => familySupports(f, "GET_NETWORK_INFO"),
+    supported: (f) => f === "b2500" || familySupports(f, "GET_NETWORK_INFO"),
     read: (m) => m.getNetworkInfo(),
   },
 ];
@@ -221,6 +251,7 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
     slotEnabled: "1",
     slotAction: "discharge",
     feedIn: "0",
+    direction: "7",
     gridCharge: "0",
   });
   const v = (k: string) => values[k] ?? "";
@@ -688,6 +719,75 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
                 Restart
               </button>
             )}
+          </div>
+        </div>
+      )}
+      {family === "b2500" && (
+        <div className="config-section">
+          <h3>Settings</h3>
+          {[
+            <div className="form-group" key="surplus">
+              <span>Surplus feed-in (firmware 226 or later, HMJ 108)</span>
+              <button
+                disabled={disabled}
+                onClick={() =>
+                  act("Surplus feed-in on", (m) => m.setSurplusFeedIn(true))
+                }
+              >
+                On
+              </button>
+              <button
+                disabled={disabled}
+                onClick={() =>
+                  act("Surplus feed-in off", (m) => m.setSurplusFeedIn(false))
+                }
+              >
+                Off
+              </button>
+            </div>,
+          ]}
+        </div>
+      )}
+
+      {family === "meter" && (
+        <div className="config-section">
+          <h3>Settings</h3>
+          <div className="form-group">
+            <label htmlFor="family-direction">
+              Direction mask (CT002; bit 0-2 = phase A-C)
+            </label>
+            <input
+              id="family-direction"
+              type="number"
+              value={v("direction")}
+              onChange={set("direction")}
+            />
+            <button
+              disabled={disabled}
+              onClick={() =>
+                act("Direction", (m) =>
+                  m.setMeterDirection(Number(v("direction"))),
+                )
+              }
+            >
+              Set
+            </button>
+          </div>
+          <div className="form-group">
+            <button
+              disabled={disabled}
+              onClick={() =>
+                act("Zero calibration", (m) => m.calibrateMeterZero())
+              }
+            >
+              Zero-point calibration (CT002)
+            </button>
+            <button
+              disabled={disabled}
+              onClick={() => act("Restart", (m) => m.restartDevice())}
+            >
+              Restart
+            </button>
           </div>
         </div>
       )}

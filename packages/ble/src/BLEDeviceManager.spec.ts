@@ -230,5 +230,49 @@ describe("BLEDeviceManager", () => {
         },
       });
     });
+
+    it("refuses to switch adaptive mode off, which would switch it on", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      await expect(
+        connected("b2500", write).setAdaptiveMode(false),
+      ).rejects.toThrow(/write the timers/);
+      expect(write).not.toHaveBeenCalled();
+    });
+
+    it("sends the B2500 surplus feed-in inverted", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      await connected("b2500", write).setSurplusFeedIn(true);
+      expect(
+        Array.from(write.mock.calls[0][0] as Uint8Array).slice(3, 5),
+      ).toEqual([0x35, 0x00]);
+    });
+
+    it("never sends the B2500 Wi-Fi query to a meter, where 0x09 restarts it", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      await expect(connected("meter", write).getWifiSignal()).rejects.toThrow(
+        /B2500 command/,
+      );
+      expect(write).not.toHaveBeenCalled();
+    });
+
+    it("factory-resets each family with its own command", async () => {
+      const meter = jest.fn().mockResolvedValue(undefined);
+      await connected("meter", meter).factoryReset();
+      expect((meter.mock.calls[0][0] as Uint8Array)[3]).toBe(0x06);
+      const b2500 = jest.fn().mockResolvedValue(undefined);
+      await connected("b2500", b2500).factoryReset();
+      expect((b2500.mock.calls[0][0] as Uint8Array)[3]).toBe(0x26);
+      expect(b2500).toHaveBeenCalledTimes(1);
+      await expect(connected("venus3", b2500).factoryReset()).rejects.toThrow();
+    });
+
+    it("refuses the B2500's Wi-Fi module update command", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      await expect(
+        connected("b2500", write).sendRawBytes(
+          new Uint8Array([0x73, 0x06, 0x23, 0x24, 0x01, 0x71]),
+        ),
+      ).rejects.toThrow(/firmware update/);
+    });
   });
 });

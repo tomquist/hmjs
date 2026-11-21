@@ -94,7 +94,7 @@ known about each:
 | | B2500 | Venus C/E | Venus E 3.0/A/D | Venus E Mini | Jupiter | CT002/CT003 |
 |---|---|---|---|---|---|---|
 | Device info, Wi-Fi setup | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Status (`getStatus`) | `getRuntimeInfo` | ✓ | ✓ | ✓ | ✓ | raw |
+| Status (`getStatus`) | `getRuntimeInfo` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Battery and cell voltages (`getBatteryInfo`) | `getCellInfo` | ✓ | ✓ | ✓ | ✓ | |
 | Grid, PV and battery (`getSystemInfo`) | | | | | ✓ | |
 | Grid and inverter (`getInverterInfo`) | | | ✓ | | | |
@@ -112,6 +112,9 @@ known about each:
 | Max charge/discharge power, peak shaving (`setMaxChargePower`, …) | | | ✓ | | | |
 | Backup output (`setBackup`) | | ✓ | ✓ | | | |
 | Power limits, UPS power, anti-reverse, restart, meter power | | | | ✓ | | |
+| Wi-Fi signal, module version, packs, CT status, rated power (`getWifiSignal`, …) | ✓ | | | | | |
+| Region, meter type, surplus feed-in, factory reset | ✓ | | | | | factory reset |
+| Meter direction, reader settings, zero calibration, phase readings | | | | | | ✓ |
 
 ```typescript
 const manager = new BLEDeviceManager();
@@ -125,7 +128,6 @@ const battery = await manager.getBatteryInfo();
 console.log(battery.cellVoltages);       // mV
 ```
 
-"raw" means the reply is available undecoded through `request(0x03)`.
 The B2500-only methods (timers, MQTT, charge mode, …) refuse to run on other
 families, because the same command numbers change unrelated settings there.
 Commands that make a device's Wi-Fi module flash new firmware are never sent.

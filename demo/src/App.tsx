@@ -870,7 +870,7 @@ const App: React.FC = () => {
     runDeviceCommand(
       "set charge mode",
       (dm) => dm.setChargeMode(mode),
-      `Charge mode set to ${mode === CHARGE_MODE.FULL ? "full" : "half"}`,
+      `Charging mode set to ${mode === CHARGE_MODE.FULL ? "fully charge, then discharge" : "charge and discharge together"}`,
     );
 
   const setOutputChannels = async (mask: number) =>
@@ -1150,14 +1150,12 @@ const App: React.FC = () => {
             Device Control
           </button>
         )}
-        {!isB2500 && (
-          <button
-            className={`tab-button ${activeTab === TabType.FamilyStatus ? "active" : ""}`}
-            onClick={() => setActiveTab(TabType.FamilyStatus)}
-          >
-            Status
-          </button>
-        )}
+        <button
+          className={`tab-button ${activeTab === TabType.FamilyStatus ? "active" : ""}`}
+          onClick={() => setActiveTab(TabType.FamilyStatus)}
+        >
+          {isB2500 ? "More" : "Status"}
+        </button>
         <button
           className={`tab-button ${activeTab === TabType.Advanced ? "active" : ""}`}
           onClick={() => setActiveTab(TabType.Advanced)}
@@ -1229,9 +1227,9 @@ const App: React.FC = () => {
           />
         )}
 
-        {activeTab === TabType.FamilyStatus && family && !isB2500 && (
+        {activeTab === TabType.FamilyStatus && (
           <FamilyStatusTab
-            family={family}
+            family={family ?? "b2500"}
             isConnected={isConnected}
             manager={deviceManagerRef.current}
             log={(message) =>

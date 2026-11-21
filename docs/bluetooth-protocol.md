@@ -28,10 +28,46 @@ The Tronic (Lidl, 100 series) is the exception: service `0x00FF`, write
 | `jupiter` | Jupiter C, Jupiter E, Jupiter C Plus | `HMM`, `HMN`, `JPLS` | `MST_AIOS_xxxx`, `MST_JPLS_xxxx` |
 | `meter` | CT002, CT003 | `HME`, `SMR`, `TPM` | `MST-TPM_xxxx`, `MST-SMR_xxxx` |
 
-`xxxx` is the end of the Bluetooth MAC address. The B2500 command set is
-documented in the library's `HMDeviceProtocol` and in
-[esphome-b2500](https://github.com/tomquist/esphome-b2500); the rest of this
-page covers the other families.
+`xxxx` is the end of the Bluetooth MAC address. The B2500's original
+command set is documented in the library's `HMDeviceProtocol` and in
+[esphome-b2500](https://github.com/tomquist/esphome-b2500); its additions are
+below, the rest of this page covers the other families.
+
+## B2500 additions
+
+Queries take the payload `01`. Several replies come straight from the
+firmware with a wrong length byte or without a checksum (`0x03`, `0x09`,
+`0x33`, `0x38`); hmjs takes them as they arrive.
+
+| Cmd | Payload | Reply / effect |
+|---|---|---|
+| `0x02` | region: 0 EU, 1 China, 2 rest of world | moves the device to that cloud host |
+| `0x09` | `01` | signal (i16, dBm), then the SSID; no checksum |
+| `0x23` | `01` | Wi-Fi module firmware version, text |
+| `0x26` | `01` | factory reset: Wi-Fi and settings back to defaults |
+| `0x2D` | `01` | rated output and input power (u16, W) |
+| `0x2E` | `01` | host pack and two extension packs, 12 bytes each: voltage (u32, mV), current (i32, mA), two temperatures (i16, °C); zeros for an absent pack |
+| `0x31` | meter code, then the meter MAC as 12 hex characters | sets the smart meter; restarts the CT search |
+| `0x33` | `01` | CT search state, connection state, phase, meter type, three phase powers, grid power and total output (i16/u16, W); no checksum |
+| `0x35` | `00` on, `01` off | surplus feed-in (firmware 226 or later, HMJ 108) |
+| `0x38` | `01` | `ip<.,.>gateway<.,.>netmask<.,.>dns`; no checksum |
+
+Corrections to the original command set:
+
+* `0x0D` is the charging mode: 0 charges and discharges at the same time (a
+  v1 passes PV2 through), 1 fully charges first. The app calls them
+  half/full.
+* `0x11` switches to adaptive mode whatever the payload; writing the timers
+  (`0x12`) is the way back to timer mode.
+* `0x14`: the six date fields are UTC, followed by the offset to local time
+  in minutes (i16), as the app sends them.
+* `0x03` also carries the charging and discharging temperature alarms (37,
+  38), the bootloader version (56), two-device mode (57) and surplus feed-in
+  off (59). The timer reply `0x13` carries the CT phase (payload 29), CT
+  status (30), the three CT phase powers (33–38) and the meter type (53).
+* `0x24` makes the Wi-Fi module download and flash firmware from a URL:
+  never sent. `0x2B` reboots the device; `0x01`, `0x15` and `0x2C` left
+  the emulated device's Bluetooth unusable for minutes.
 
 The Saturn micro-inverters (`HMI`) run their Bluetooth on the Wi-Fi module
 rather than the control board; their protocol is not covered here.
@@ -240,8 +276,23 @@ temperatures at 40 in whole °C.
 
 ### CT002 / CT003
 
-Device info and Wi-Fi setup work as above. The status block is not decoded
-yet; the library returns it raw.
+`0x03` (payload `01`) status. The CT002 sends 19 payload bytes: firmware
+version (0), phase A/B/C and total power (i16, W) at 7, 9, 11, 13, batteries
+reading the meter (16), Wi-Fi signal (i8, dBm, 17), direction mask (18). The
+CT003 sends a longer block: firmware version (0), total power (i32, W, 1),
+total energy (i64, 0.1 Wh, 5; on a DSMR meter import minus export), batteries
+(14), Wi-Fi signal (15), reader settings (16–19), phase A/B/C power (i32, W)
+at 24, 28, 32.
+
+| Cmd | Payload | Effect | Meter |
+|---|---|---|---|
+| `0x08` | `01` | configured Wi-Fi network name | both |
+| `0x10` | `01` | zero-point calibration | CT002 |
+| `0x11` | interface (0 infrared, 1 P1), serial settings code, protocol (0 SML, 1 DSMR), meter number | reader settings; the meter restarts | CT003 |
+| `0x13`, `0x15`, `0x16` | `01` | phase voltages (V), voltage phase angles AB/CA/BC (°), active power per phase (W) | CT002 |
+| `0x17` | mask, bit 0–2 = phase A–C | measurement direction. On the emulated HME-4 a cleared bit inverts the phase; check on your meter | CT002 |
+| `0x09` | `01` | restart (it is the Wi-Fi query on a B2500) | both |
+| `0x06` | `01` | factory reset | both |
 
 ## How this was mapped
 
@@ -268,6 +319,6 @@ and the firmware disagreed, the firmware won (the Mini's phase mode is
 Bluetooth).
 
 The library was then tested end to end against the emulated Venus E 3.0,
-Jupiter and Venus E Mini. Real devices may run newer firmware; if a value
+Jupiter, Venus E Mini, B2500 v3 (HMA V232) and CT002 (HME-4 V124). Real devices may run newer firmware; if a value
 looks wrong on yours, please open an issue with the raw reply from the
 Advanced tab.

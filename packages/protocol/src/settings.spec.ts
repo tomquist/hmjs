@@ -20,6 +20,10 @@ import {
   parseMiniMeterPower,
   parseMiniSchedule,
   parseTimePeriods,
+  parseMeterStatus,
+  createMeterDirectionCommand,
+  createMeterReaderCommand,
+  createRestartCommand,
   supportsSetting,
 } from "./settings.js";
 import { decodeFamilyMessage } from "./families.js";
@@ -274,5 +278,75 @@ describe("setting commands", () => {
     );
     expect(() => createDepthOfDischargeCommand("venus3", 89)).toThrow();
     expect(() => createUpsChargePowerCommand("venus3", 500)).toThrow();
+  });
+});
+
+describe("CT002 / CT003", () => {
+  const payloadOf = (h: string) => {
+    const b = h
+      .replace(/ /g, "")
+      .match(/../g)!
+      .map((x) => parseInt(x, 16));
+    return new Uint8Array(b.slice(4, -1));
+  };
+
+  it("decodes the CT002 status with 16-bit powers", () => {
+    expect(
+      parseMeterStatus(
+        payloadOf(
+          "73182303 7c 000000000000 6f00 22ff 4d01 de00 01 00 d0 ff 39",
+        ),
+      ),
+    ).toMatchObject({
+      firmwareVersion: 124,
+      phases: [111, -222, 333],
+      total: 222,
+      batteries: 0,
+      wifiSignal: -48,
+      directionMask: 0xff,
+    });
+  });
+
+  it("decodes the CT003 status with 32-bit powers and the energy", () => {
+    expect(
+      parseMeterStatus(
+        payloadOf(
+          "732a2303 7a de000000 4e13b70000000000 01 00 d0 01 00 01 ff 00 01 01 00 6f000000 22ffffff 4d010000 07 e0",
+        ),
+      ),
+    ).toMatchObject({
+      firmwareVersion: 122,
+      total: 222,
+      totalEnergy: 1199.803,
+      wifiSignal: -48,
+      reader: { interface: 1, serialCode: 0, protocol: 1, meterNumber: 255 },
+      phases: [111, -222, 333],
+    });
+  });
+
+  it("builds the meter commands", () => {
+    expect(bytes(createMeterDirectionCommand(5))).toEqual([0x17, 5]);
+    expect(
+      bytes(
+        createMeterReaderCommand({
+          interface: 0,
+          serialCode: 1,
+          protocol: 0,
+          meterNumber: 42,
+        }),
+      ),
+    ).toEqual([0x11, 0, 1, 0, 42]);
+    // a meter restarts with 0x09, which is a query on the B2500
+    expect(bytes(createRestartCommand("meter"))).toEqual([0x09, 1]);
+  });
+
+  it("routes the status through decodeFamilyMessage", () => {
+    const f = new Uint8Array(
+      "73182303 7c 000000000000 6f00 22ff 4d01 de00 01 00 d0 ff 39"
+        .replace(/ /g, "")
+        .match(/../g)!
+        .map((x) => parseInt(x, 16)),
+    );
+    expect(decodeFamilyMessage("meter", f)?.kind).toBe("meterStatus");
   });
 });

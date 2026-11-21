@@ -16,11 +16,18 @@
  */
 
 import {
+  parseMeterPhaseReply,
+  parseMeterStatus,
   parseMiniMeterPower,
   parseMiniSchedule,
   parseTimePeriods,
 } from "./settings.js";
-import type { MeterPower, TimePeriod } from "./settings.js";
+import type {
+  MeterPhaseReadings,
+  MeterPower,
+  MeterStatus,
+  TimePeriod,
+} from "./settings.js";
 
 /** Device families that share one command set. */
 export type DeviceFamily =
@@ -125,7 +132,7 @@ export function detectDeviceFamily(device: {
  * commands mean the same on both.
  */
 export const MARSTEK_COMMANDS = {
-  /** Status block; layout per family */
+  /** Status block; layout per family (send with payload `0x01`) */
   RUNTIME_INFO: 0x03,
   /** `type=…,id=…,mac=…` plus versions; send with payload `0x01` */
   DEVICE_INFO: 0x04,
@@ -157,8 +164,8 @@ const MINI_METER_POWER = 0x1a;
  * Commands that make the Wi-Fi module download and flash new firmware.
  *
  * `0x17` on the Venus E Mini flashes from a fixed address on the local
- * network; `0x29` on the CT002/CT003 flashes from a URL taken from the
- * payload. A wrong image can leave the device without Wi-Fi or Bluetooth, so
+ * network; `0x29` on the CT002/CT003 and `0x24` on the B2500 flash from a
+ * URL taken from the payload. A wrong image can leave the device without Wi-Fi or Bluetooth, so
  * {@link assertCommandAllowed} refuses them.
  */
 export const DANGEROUS_COMMANDS: Readonly<
@@ -166,6 +173,7 @@ export const DANGEROUS_COMMANDS: Readonly<
 > = {
   venusMini: [0x17],
   meter: [0x29],
+  b2500: [0x24],
 };
 
 /** Throw if `command` would start a firmware update on `family`. */
@@ -187,7 +195,7 @@ export const FAMILY_SUPPORT: Readonly<
   RUNTIME_INFO: ["venus3", "venusMini", "jupiter", "venus", "meter"],
   DEVICE_INFO: ["b2500", "venus", "venus3", "venusMini", "jupiter", "meter"],
   SET_WIFI: ["b2500", "venus", "venus3", "venusMini", "jupiter", "meter"],
-  GET_WIFI_SSID: ["venus", "venus3", "venusMini"],
+  GET_WIFI_SSID: ["venus", "venus3", "venusMini", "meter"],
   GET_DATETIME: ["venus3", "jupiter"],
   INVERTER_INFO: ["venus3"],
   BATTERY_INFO: ["venus3", "jupiter", "venusMini", "venus"],
@@ -748,6 +756,8 @@ export type FamilyMessage =
       data: ReturnType<typeof parseMiniSchedule>;
     }
   | { kind: "meterPower"; command: number; data: MeterPower }
+  | { kind: "meterStatus"; command: number; data: MeterStatus }
+  | { kind: "meterPhases"; command: number; data: MeterPhaseReadings }
   | { kind: "dateTime"; command: number; data: DeviceDateTime }
   | { kind: "wifiSsid"; command: number; data: string }
   | { kind: "networkInfo"; command: number; data: NetworkInfo }
@@ -847,6 +857,20 @@ export function decodeFamilyMessage(
           kind: "systemInfo",
           command,
           data: parseJupiterSystemInfo(payload),
+        };
+      break;
+    case "meter":
+      if (command === C.RUNTIME_INFO)
+        return {
+          kind: "meterStatus",
+          command,
+          data: parseMeterStatus(payload),
+        };
+      if (command === 0x13 || command === 0x15 || command === 0x16)
+        return {
+          kind: "meterPhases",
+          command,
+          data: parseMeterPhaseReply(command, payload),
         };
       break;
     default:

@@ -15,6 +15,13 @@
  * out; the raw payload is always available.
  */
 
+import {
+  parseMiniMeterPower,
+  parseMiniSchedule,
+  parseTimePeriods,
+} from "./settings.js";
+import type { MeterPower, TimePeriod } from "./settings.js";
+
 /** Device families that share one command set. */
 export type DeviceFamily =
   | "b2500"
@@ -124,7 +131,7 @@ export const MARSTEK_COMMANDS = {
   DEVICE_INFO: 0x04,
   /** `ssid<.,.>password`, as on the B2500 */
   SET_WIFI: 0x05,
-  /** Name of the Wi-Fi network the device is configured for (Venus) */
+  /** Name of the Wi-Fi network the device is configured for */
   GET_WIFI_SSID: 0x08,
   /** Device clock (Venus E 3.0/A/D, Jupiter) */
   GET_DATETIME: 0x0b,
@@ -132,13 +139,19 @@ export const MARSTEK_COMMANDS = {
   INVERTER_INFO: 0x0d,
   /** Battery data with cell voltages (all Venus models, Jupiter) */
   BATTERY_INFO: 0x14,
-  /** `ip:…,gate:…,mask:…,dns:…` (Venus C/E, Venus E Mini) */
+  /**
+   * `ip:…,gate:…,mask:…,dns:…` (`24 00`); the Jupiter answers the same text
+   * to `29 00` (see `createNetworkInfoCommand`)
+   */
   GET_NETWORK_INFO: 0x24,
-  /** Depth of discharge in percent, one byte (Venus E 3.0/A/D, Jupiter) */
-  SET_DOD: 0x54,
-  /** Status LED, one byte: 1 on, 0 off (Venus E 3.0/A/D) */
-  SET_LED: 0x59,
+  /** Time periods (Venus, Jupiter) or the Mini's schedule, with payload `0x01` */
+  GET_SCHEDULE: 0x0a,
 } as const;
+
+/** The Jupiter's network info command (`29 00`; 0x24 on the others). */
+const JUPITER_NETWORK_INFO = 0x29;
+/** The Venus E Mini's meter power query. */
+const MINI_METER_POWER = 0x1a;
 
 /**
  * Commands that make the Wi-Fi module download and flash new firmware.
@@ -174,13 +187,12 @@ export const FAMILY_SUPPORT: Readonly<
   RUNTIME_INFO: ["venus3", "venusMini", "jupiter", "venus", "meter"],
   DEVICE_INFO: ["b2500", "venus", "venus3", "venusMini", "jupiter", "meter"],
   SET_WIFI: ["b2500", "venus", "venus3", "venusMini", "jupiter", "meter"],
-  GET_WIFI_SSID: ["venus", "venus3"],
+  GET_WIFI_SSID: ["venus", "venus3", "venusMini"],
   GET_DATETIME: ["venus3", "jupiter"],
   INVERTER_INFO: ["venus3"],
   BATTERY_INFO: ["venus3", "jupiter", "venusMini", "venus"],
-  GET_NETWORK_INFO: ["venus", "venusMini"],
-  SET_DOD: ["venus3", "jupiter"],
-  SET_LED: ["venus3"],
+  GET_NETWORK_INFO: ["venus", "venus3", "venusMini", "jupiter"],
+  GET_SCHEDULE: ["venus", "venus3", "jupiter", "venusMini"],
 };
 
 /** Whether `family` is known to support the shared command `command`. */
@@ -508,6 +520,9 @@ export function parseVenusMiniBatteryInfo(payload: Uint8Array): BatteryInfo {
   };
 }
 
+const bool = (v: number | undefined) => (v === undefined ? undefined : v === 1);
+const neg = (v: number | undefined) => (v === undefined ? undefined : -v);
+
 /** Status block of a Venus E Mini (`0x03`); only the confirmed fields. */
 export interface VenusMiniRuntimeInfo {
   /** Grid frequency in Hz */
@@ -520,8 +535,42 @@ export interface VenusMiniRuntimeInfo {
   soc?: number;
   /** Energy left in the battery in Wh */
   remainingEnergy?: number;
+  /** Battery power in W; negative while discharging */
+  batteryPower?: number;
+  /** Working mode */
+  workingMode?: "auto" | "ups" | "manual" | "ai";
+  /** Whether the meter answers */
+  meterConnected?: boolean;
+  /** Depth of discharge in percent */
+  depthOfDischarge?: number;
+  /** Wi-Fi signal in dBm */
+  wifiSignal?: number;
+  /** Inverter, control and DC/DC firmware versions */
+  inverterVersion?: number;
+  firmwareVersion?: number;
+  dcdcVersion?: number;
+  /** Meter type code (as set with the meter type command) */
+  meterType?: number;
+  /** Detected meter phase */
+  meterPhase?: number;
+  /** Status LED on */
+  ledOn?: boolean;
+  /** Feed-in limit: the higher one (1250 W on inverter firmware 270) */
+  highFeedInLimit?: boolean;
+  /** Grid charging limited to 800 W instead of 1250 W */
+  lowGridChargeLimit?: boolean;
+  /** UPS charge power in W */
+  upsChargePower?: number;
+  /** Local API enabled, its port and remote port */
+  localApiEnabled?: boolean;
+  localApiPort?: number;
+  localApiRemotePort?: number;
+  /** Cloud server region */
+  cloudServer?: number;
   rawPayload: Uint8Array;
 }
+
+const MINI_MODES = ["auto", "ups", "manual", "ai"] as const;
 
 export function parseVenusMiniRuntimeInfo(
   payload: Uint8Array,
@@ -530,9 +579,27 @@ export function parseVenusMiniRuntimeInfo(
   return {
     gridFrequency: r.scaled(r.u16(0), 0.01),
     gridVoltage: r.scaled(r.u16(2), 0.1),
-    remainingEnergy: r.u16(14),
+    remainingEnergy: r.u32(14),
     soc: r.scaled(r.u16(18), 0.1),
-    acPower: r.i16(34),
+    workingMode: MINI_MODES[r.u8(24) ?? -1],
+    meterConnected: bool(r.u8(25)),
+    acPower: r.i32(34),
+    depthOfDischarge: r.u8(42),
+    batteryPower: r.i16(47),
+    wifiSignal: neg(r.u8(54)),
+    inverterVersion: r.u16(91),
+    firmwareVersion: r.u16(93),
+    dcdcVersion: r.u16(95),
+    meterType: r.u8(97),
+    ledOn: r.u8(100) === undefined ? undefined : r.u8(100) === 0,
+    highFeedInLimit: bool(r.u8(101)),
+    meterPhase: r.u8(102),
+    cloudServer: r.u8(103),
+    upsChargePower: r.u16(112),
+    localApiEnabled: bool(r.u8(114)),
+    localApiPort: r.u16(115),
+    localApiRemotePort: r.u16(117),
+    lowGridChargeLimit: bool(r.u8(119)),
     rawPayload: payload.slice(),
   };
 }
@@ -659,20 +726,6 @@ export function parseJupiterSystemInfo(payload: Uint8Array): JupiterSystemInfo {
   };
 }
 
-/** Payload for {@link MARSTEK_COMMANDS.SET_DOD}. */
-export function createDepthOfDischargePayload(
-  family: DeviceFamily | undefined,
-  percent: number,
-): Uint8Array {
-  const [min, max] = family === "jupiter" ? [30, 90] : [30, 88];
-  if (!Number.isInteger(percent) || percent < min || percent > max) {
-    throw new Error(
-      `Depth of discharge must be an integer between ${min} and ${max}`,
-    );
-  }
-  return new Uint8Array([percent]);
-}
-
 /** A reply decoded with the family's own layout. */
 export type FamilyMessage =
   | { kind: "deviceInfo"; command: number; data: Record<string, string> }
@@ -688,6 +741,13 @@ export type FamilyMessage =
   | { kind: "batteryInfo"; command: number; data: BatteryInfo }
   | { kind: "systemInfo"; command: number; data: JupiterSystemInfo }
   | { kind: "inverterInfo"; command: number; data: Venus3InverterInfo }
+  | { kind: "timePeriods"; command: number; data: TimePeriod[] }
+  | {
+      kind: "miniSchedule";
+      command: number;
+      data: ReturnType<typeof parseMiniSchedule>;
+    }
+  | { kind: "meterPower"; command: number; data: MeterPower }
   | { kind: "dateTime"; command: number; data: DeviceDateTime }
   | { kind: "wifiSsid"; command: number; data: string }
   | { kind: "networkInfo"; command: number; data: NetworkInfo }
@@ -792,6 +852,22 @@ export function decodeFamilyMessage(
     default:
       break;
   }
+  if (command === C.GET_SCHEDULE && family === "venusMini") {
+    return { kind: "miniSchedule", command, data: parseMiniSchedule(payload) };
+  }
+  if (command === C.GET_SCHEDULE && familySupports(family, "GET_SCHEDULE")) {
+    return {
+      kind: "timePeriods",
+      command,
+      data: parseTimePeriods(family, payload),
+    };
+  }
+  if (command === MINI_METER_POWER && family === "venusMini") {
+    return { kind: "meterPower", command, data: parseMiniMeterPower(payload) };
+  }
+  if (command === JUPITER_NETWORK_INFO && family === "jupiter") {
+    return { kind: "networkInfo", command, data: parseNetworkInfo(payload) };
+  }
   if (command === C.GET_DATETIME && familySupports(family, "GET_DATETIME")) {
     const dt = parseDeviceDateTime(payload);
     if (dt) return { kind: "dateTime", command, data: dt };
@@ -801,7 +877,8 @@ export function decodeFamilyMessage(
   }
   if (
     command === C.GET_NETWORK_INFO &&
-    familySupports(family, "GET_NETWORK_INFO")
+    familySupports(family, "GET_NETWORK_INFO") &&
+    family !== "jupiter"
   ) {
     return { kind: "networkInfo", command, data: parseNetworkInfo(payload) };
   }

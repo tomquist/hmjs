@@ -49,7 +49,6 @@ export {
   parseVenusMiniBatteryInfo,
   parseJupiterRuntimeInfo,
   parseJupiterSystemInfo,
-  createDepthOfDischargePayload,
 } from "./families.js";
 export type {
   DeviceFamily,
@@ -66,6 +65,51 @@ export type {
   JupiterRuntimeInfo,
   JupiterSystemInfo,
 } from "./families.js";
+
+// Settings and schedules of the Venus, Venus E Mini and Jupiter
+export {
+  SETTING_SUPPORT,
+  supportsSetting,
+  createWorkingModeCommand,
+  createReadTimePeriodsCommand,
+  parseTimePeriods,
+  createTimePeriodCommand,
+  createReadMiniScheduleCommand,
+  parseMiniSchedule,
+  createMiniScheduleSlotCommand,
+  createDepthOfDischargeCommand,
+  createStatusLedCommand,
+  createBluetoothCommand,
+  createSurplusFeedInCommand,
+  createLocalApiCommand,
+  createMaxChargePowerCommand,
+  createMaxDischargePowerCommand,
+  createPeakShavingCommand,
+  createBackupCommand,
+  createMeterIpCommand,
+  createPhaseDetectionCommand,
+  createClockCommand,
+  createCloudServerCommand,
+  createRestartCommand,
+  createPowerLimitsCommand,
+  createUpsChargePowerCommand,
+  createAntiReverseCommand,
+  createNetworkInfoCommand,
+  createMeterPowerCommand,
+  parseMiniMeterPower,
+  VENUS_TIME_PERIODS,
+  JUPITER_TIME_PERIODS,
+  MINI_SCHEDULE_SLOTS,
+} from "./settings.js";
+export type {
+  FamilyCommand,
+  Setting,
+  WorkingMode,
+  TimePeriod,
+  MiniScheduleSlot,
+  MiniSlotAction,
+  MeterPower,
+} from "./settings.js";
 
 // Export types
 export type {

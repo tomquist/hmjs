@@ -149,10 +149,27 @@ describe("BLEDeviceManager", () => {
 
     it("refuses B2500 commands on other families", async () => {
       const write = jest.fn().mockResolvedValue(undefined);
-      await expect(connected("venus", write).restartDevice()).rejects.toThrow(
-        /B2500 command/,
-      );
+      await expect(
+        connected("venus", write).setChargeMode(0x01),
+      ).rejects.toThrow(/B2500 command/);
       expect(write).not.toHaveBeenCalled();
+    });
+
+    it("restarts with each family's command, where there is one", async () => {
+      const write = jest.fn().mockResolvedValue(undefined);
+      await connected("venusMini", write).restartDevice();
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(Array.from(write.mock.calls[0][0] as Uint8Array)).toEqual([
+        0x73,
+        0x06,
+        0x23,
+        0x2b,
+        0x01,
+        0x73 ^ 0x06 ^ 0x23 ^ 0x2b ^ 0x01,
+      ]);
+      await expect(connected("venus3", write).restartDevice()).rejects.toThrow(
+        /not supported/,
+      );
     });
 
     it("still sends B2500 commands when the family is unknown", async () => {

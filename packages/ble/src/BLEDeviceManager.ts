@@ -15,13 +15,41 @@ import {
   ALL_NAME_PREFIXES,
   MARSTEK_COMMANDS,
   assertCommandAllowed,
-  createDepthOfDischargePayload,
+  createAntiReverseCommand,
+  createBackupCommand,
+  createBluetoothCommand,
+  createClockCommand,
+  createCloudServerCommand,
+  createDepthOfDischargeCommand,
+  createLocalApiCommand,
+  createMaxChargePowerCommand,
+  createMaxDischargePowerCommand,
+  createMeterIpCommand,
+  createMeterPowerCommand,
+  createMiniScheduleSlotCommand,
+  createNetworkInfoCommand,
+  createPeakShavingCommand,
+  createPhaseDetectionCommand,
+  createPowerLimitsCommand,
+  createReadMiniScheduleCommand,
+  createReadTimePeriodsCommand,
+  createRestartCommand,
+  createStatusLedCommand,
+  createSurplusFeedInCommand,
+  createTimePeriodCommand,
+  createUpsChargePowerCommand,
+  createWorkingModeCommand,
   decodeFamilyMessage,
   detectDeviceFamily,
   familySupports,
   parseKeyValuePayload,
 } from "@tomquist/hmjs-protocol";
 import type {
+  FamilyCommand,
+  MeterPower,
+  MiniScheduleSlot,
+  TimePeriod,
+  WorkingMode,
   BatteryInfo,
   DeviceDateTime,
   DeviceFamily,
@@ -926,10 +954,16 @@ class BLEDeviceManager {
    * The device drops the BLE connection while it reboots.
    */
   public async restartDevice(): Promise<void> {
-    this.requireB2500("restartDevice");
     // sendCommand repeats every frame by default. The device can drop the BLE
     // link as soon as it acts on the first restart frame, which would make the
     // second write fail and report a successful restart as an error.
+    if (this.family && this.family !== "b2500") {
+      // the Venus E Mini restarts over Bluetooth; the other families don't
+      await this.sendFamilyCommand(createRestartCommand(this.family), {
+        sendTwice: false,
+      });
+      return;
+    }
     await this.sendCommand(COMMAND_TYPES.RESTART_DEVICE, [0x01], {
       sendTwice: false,
     });
@@ -1159,15 +1193,17 @@ class BLEDeviceManager {
     return this.requestKind(MARSTEK_COMMANDS.GET_WIFI_SSID, "wifiSsid");
   }
 
-  /** IP address, gateway, netmask and DNS: Venus C/E and Venus E Mini (`0x24`). */
+  /** IP address, gateway, netmask and DNS: every Venus, the Mini and the Jupiter. */
   public async getNetworkInfo(): Promise<NetworkInfo> {
     this.requireFamily("GET_NETWORK_INFO", "getNetworkInfo");
-    return this.requestKind(MARSTEK_COMMANDS.GET_NETWORK_INFO, "networkInfo");
+    const c = createNetworkInfoCommand(this.family);
+    return this.requestKind(c.command, "networkInfo", Array.from(c.payload));
   }
 
   /**
    * Set the depth of discharge on any family that supports it: the B2500
-   * (0-100 %), the Venus E 3.0/A/D (30-88 %) and the Jupiter (30-90 %).
+   * (0-100 %), the Venus E 3.0/A/D (30-88 %), the Venus E Mini and the
+   * Jupiter (30-90 %).
    *
    * This is persisted to the device's flash, so do not call it on a timer or
    * in a control loop.
@@ -1176,17 +1212,188 @@ class BLEDeviceManager {
     if (!this.family || this.family === "b2500") {
       return this.setDod(percent);
     }
-    const family = this.requireFamily("SET_DOD", "setDepthOfDischarge");
-    await this.sendCommand(
-      MARSTEK_COMMANDS.SET_DOD,
-      createDepthOfDischargePayload(family, percent),
+    await this.sendFamilyCommand(
+      createDepthOfDischargeCommand(this.family, percent),
     );
   }
 
-  /** Turn the status LED of a Venus E 3.0/A/D on or off (`0x59`). */
+  /** Turn the status LED on or off (Venus E 3.0/A/D, Venus E Mini). */
   public async setStatusLed(on: boolean): Promise<void> {
-    this.requireFamily("SET_LED", "setStatusLed");
-    await this.sendCommand(MARSTEK_COMMANDS.SET_LED, [on ? 0x01 : 0x00]);
+    await this.sendFamilyCommand(createStatusLedCommand(this.family, on));
+  }
+
+  private async sendFamilyCommand(
+    c: FamilyCommand,
+    options?: CommandOptions,
+  ): Promise<void> {
+    await this.sendCommand(c.command, c.payload, options);
+  }
+
+  /**
+   * Set the working mode: `auto` follows the meter, `manual` runs the time
+   * periods, `ai` the cloud's plan, `ups` (Venus E Mini) charges from the
+   * grid. The Jupiter takes `auto` and `manual`.
+   */
+  public async setWorkingMode(mode: WorkingMode): Promise<void> {
+    await this.sendFamilyCommand(createWorkingModeCommand(this.family, mode));
+  }
+
+  /** Read the time periods of a Venus or Jupiter (10 and 5 slots). */
+  public async getTimePeriods(): Promise<TimePeriod[]> {
+    const c = createReadTimePeriodsCommand(this.family);
+    return this.requestKind(c.command, "timePeriods", Array.from(c.payload));
+  }
+
+  /**
+   * Write one time period of a Venus or Jupiter. The slots are stored one
+   * at a time; on a Jupiter this also switches to manual mode.
+   * @param index 0-based slot
+   */
+  public async setTimePeriod(index: number, period: TimePeriod): Promise<void> {
+    await this.sendFamilyCommand(
+      createTimePeriodCommand(this.family, index, period),
+    );
+  }
+
+  /** Read the Venus E Mini's working mode and six schedule slots. */
+  public async getMiniSchedule(): Promise<{
+    workingMode?: WorkingMode;
+    slots: MiniScheduleSlot[];
+  }> {
+    if (this.family !== "venusMini") {
+      throw new Error(
+        "getMiniSchedule() is only supported on the Venus E Mini",
+      );
+    }
+    const c = createReadMiniScheduleCommand();
+    return this.requestKind(c.command, "miniSchedule", Array.from(c.payload));
+  }
+
+  /**
+   * Write one of the Venus E Mini's schedule slots.
+   * @param index 0-based slot, 0-5
+   */
+  public async setMiniScheduleSlot(
+    index: number,
+    slot: MiniScheduleSlot,
+  ): Promise<void> {
+    if (this.family !== "venusMini") {
+      throw new Error(
+        "setMiniScheduleSlot() is only supported on the Venus E Mini",
+      );
+    }
+    await this.sendFamilyCommand(createMiniScheduleSlotCommand(index, slot));
+  }
+
+  /**
+   * Bluetooth advertising on or off. Off is the app's "Bluetooth lock": the
+   * device stops advertising and this connection ends.
+   */
+  public async setBluetooth(on: boolean): Promise<void> {
+    await this.sendFamilyCommand(createBluetoothCommand(this.family, on), {
+      sendTwice: on,
+    });
+  }
+
+  /** Surplus feed-in on or off (Venus, Jupiter). */
+  public async setSurplusFeedIn(on: boolean): Promise<void> {
+    await this.sendFamilyCommand(createSurplusFeedInCommand(this.family, on));
+  }
+
+  /**
+   * Enable or disable the local API (Marstek Open API) and set its UDP
+   * port; the Venus E Mini also takes the remote port.
+   */
+  public async setLocalApi(
+    enabled: boolean,
+    port: number,
+    remotePort?: number,
+  ): Promise<void> {
+    await this.sendFamilyCommand(
+      createLocalApiCommand(this.family, enabled, port, remotePort),
+    );
+  }
+
+  /** Maximum charging power in W (Venus E 3.0/A/D). */
+  public async setMaxChargePower(watts: number): Promise<void> {
+    await this.sendFamilyCommand(
+      createMaxChargePowerCommand(this.family, watts),
+    );
+  }
+
+  /** Maximum discharging power in W (Venus E 3.0/A/D). */
+  public async setMaxDischargePower(watts: number): Promise<void> {
+    await this.sendFamilyCommand(
+      createMaxDischargePowerCommand(this.family, watts),
+    );
+  }
+
+  /** Peak shaving at `watts`, or off with `null` (Venus E 3.0/A/D). */
+  public async setPeakShaving(watts: number | null): Promise<void> {
+    await this.sendFamilyCommand(createPeakShavingCommand(this.family, watts));
+  }
+
+  /** Backup (EPS) output on or off (Venus). */
+  public async setBackup(on: boolean): Promise<void> {
+    await this.sendFamilyCommand(createBackupCommand(this.family, on));
+  }
+
+  /** IP address of a network meter (P1 meter, EcoTracker). */
+  public async setMeterIp(ip: string): Promise<void> {
+    await this.sendFamilyCommand(createMeterIpCommand(this.family, ip));
+  }
+
+  /** Start the meter phase detection. */
+  public async startPhaseDetection(): Promise<void> {
+    await this.sendFamilyCommand(createPhaseDetectionCommand(this.family), {
+      sendTwice: false,
+    });
+  }
+
+  /** Set the device clock to `date` (default: now, local time). */
+  public async setClock(date?: Date): Promise<void> {
+    await this.sendFamilyCommand(createClockCommand(this.family, date));
+  }
+
+  /**
+   * Cloud server region (see `createCloudServerCommand` for the codes). A
+   * wrong value disconnects the device from the Marstek cloud.
+   */
+  public async setCloudServer(server: number): Promise<void> {
+    await this.sendFamilyCommand(createCloudServerCommand(this.family, server));
+  }
+
+  /**
+   * The Venus E Mini's power limits: the higher feed-in limit, and grid
+   * charging limited to 800 W.
+   */
+  public async setPowerLimits(
+    highFeedIn: boolean,
+    lowGridCharge: boolean,
+  ): Promise<void> {
+    await this.sendFamilyCommand(
+      createPowerLimitsCommand(this.family, highFeedIn, lowGridCharge),
+    );
+  }
+
+  /** The Venus E Mini's UPS charge power in W. */
+  public async setUpsChargePower(watts: number): Promise<void> {
+    await this.sendFamilyCommand(
+      createUpsChargePowerCommand(this.family, watts),
+    );
+  }
+
+  /** The Venus E Mini's anti-reverse (zero feed-in) setting. */
+  public async setAntiReverse(enabled: boolean, watts: number): Promise<void> {
+    await this.sendFamilyCommand(
+      createAntiReverseCommand(this.family, enabled, watts),
+    );
+  }
+
+  /** Meter power per phase as the Venus E Mini sees it. */
+  public async getMeterPower(): Promise<MeterPower> {
+    const c = createMeterPowerCommand(this.family);
+    return this.requestKind(c.command, "meterPower", Array.from(c.payload));
   }
 
   /**

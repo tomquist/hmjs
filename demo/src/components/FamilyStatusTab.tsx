@@ -3,7 +3,11 @@ import type { BLEDeviceManager } from "@tomquist/hmjs-ble";
 import {
   DEVICE_FAMILIES,
   DeviceFamily,
+  MiniSlotAction,
+  Setting,
+  WorkingMode,
   familySupports,
+  supportsSetting,
 } from "@tomquist/hmjs-protocol";
 
 interface FamilyStatusTabProps {
@@ -51,6 +55,30 @@ const LABELS: Record<string, [string, string?]> = {
   gateway: ["Gateway"],
   netmask: ["Netmask"],
   dns: ["DNS"],
+  workingMode: ["Working mode"],
+  meterConnected: ["Meter connected"],
+  dcdcVersion: ["DC/DC version"],
+  meterType: ["Meter type"],
+  meterPhase: ["Meter phase"],
+  ledOn: ["LED on"],
+  highFeedInLimit: ["High feed-in limit"],
+  lowGridChargeLimit: ["Grid charge limited to 800 W"],
+  upsChargePower: ["UPS charge power", "W"],
+  localApiEnabled: ["Local API"],
+  localApiRemotePort: ["Local API remote port"],
+  cloudServer: ["Cloud server"],
+  enabled: ["Enabled"],
+  start: ["Start"],
+  end: ["End"],
+  weekdays: ["Weekday mask"],
+  action: ["Action"],
+  slots: ["Slot"],
+  phases: ["Phases", "W"],
+  total: ["Total", "W"],
+  phase: ["Phase"],
+  meterOnline: ["Meter answering"],
+  hour: ["hour"],
+  minute: ["minute"],
 };
 
 const label = (key: string): string => LABELS[key]?.[0] ?? key;
@@ -92,50 +120,78 @@ export const toRows = (value: unknown, prefix = "", key = ""): Row[] => {
 
 interface Reading {
   title: string;
-  command: Parameters<typeof familySupports>[1];
+  supported: (family: DeviceFamily) => boolean;
   read: (m: BLEDeviceManager) => Promise<unknown>;
-  families?: DeviceFamily[];
 }
+
+const only =
+  (...families: DeviceFamily[]) =>
+  (family: DeviceFamily) =>
+    families.includes(family);
 
 const READINGS: Reading[] = [
   {
     title: "Status",
-    command: "RUNTIME_INFO",
+    supported: only("venus", "venus3", "venusMini", "jupiter"),
     read: (m) => m.getStatus(),
-    families: ["venus", "venus3", "venusMini", "jupiter"],
   },
   {
     title: "Battery and cells",
-    command: "BATTERY_INFO",
+    supported: (f) => familySupports(f, "BATTERY_INFO"),
     read: (m) => m.getBatteryInfo(),
   },
   {
     title: "Grid, PV and battery",
-    command: "BATTERY_INFO",
+    supported: only("jupiter"),
     read: (m) => m.getSystemInfo(),
-    families: ["jupiter"],
   },
   {
     title: "Inverter",
-    command: "INVERTER_INFO",
+    supported: (f) => familySupports(f, "INVERTER_INFO"),
     read: (m) => m.getInverterInfo(),
   },
   {
+    title: "Time periods",
+    supported: (f) => supportsSetting(f, "timePeriods"),
+    read: (m) => m.getTimePeriods(),
+  },
+  {
+    title: "Schedule",
+    supported: only("venusMini"),
+    read: (m) => m.getMiniSchedule(),
+  },
+  {
+    title: "Meter power",
+    supported: only("venusMini"),
+    read: (m) => m.getMeterPower(),
+  },
+  {
     title: "Device clock",
-    command: "GET_DATETIME",
+    supported: (f) => familySupports(f, "GET_DATETIME"),
     read: (m) => m.getDeviceTime(),
   },
   {
     title: "Wi-Fi network",
-    command: "GET_WIFI_SSID",
+    supported: (f) => familySupports(f, "GET_WIFI_SSID"),
     read: async (m) => ({ ssid: await m.getWifiSsid() }),
   },
   {
     title: "Network",
-    command: "GET_NETWORK_INFO",
+    supported: (f) => familySupports(f, "GET_NETWORK_INFO"),
     read: (m) => m.getNetworkInfo(),
   },
 ];
+
+const MODES: Record<string, WorkingMode[]> = {
+  venusMini: ["auto", "ups", "manual", "ai"],
+  jupiter: ["auto", "manual"],
+  default: ["auto", "manual", "ai"],
+};
+
+const parseTime = (s: string) => {
+  const [hour, minute] = s.split(":").map(Number);
+  return { hour, minute };
+};
 
 const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
   family,
@@ -145,13 +201,35 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
 }) => {
   const [results, setResults] = useState<Record<string, Row[]>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [dod, setDod] = useState(family === "jupiter" ? 90 : 88);
+  const [values, setValues] = useState<Record<string, string>>({
+    dod: family === "venus3" ? "88" : "90",
+    mode: "auto",
+    apiPort: "30000",
+    apiRemotePort: "30000",
+    apiEnabled: "1",
+    maxCharge: "2500",
+    maxDischarge: "800",
+    peak: "300",
+    meterIp: "",
+    ups: "800",
+    antiReverse: "0",
+    slot: "0",
+    slotStart: "08:00",
+    slotEnd: "16:00",
+    slotDays: "127",
+    slotPower: "400",
+    slotEnabled: "1",
+    slotAction: "discharge",
+    feedIn: "0",
+    gridCharge: "0",
+  });
+  const v = (k: string) => values[k] ?? "";
+  const set = (k: string) => (e: { target: { value: string } }) =>
+    setValues((prev) => ({ ...prev, [k]: e.target.value }));
+  const can = (s: Setting) => supportsSetting(family, s);
+  const disabled = !isConnected || !manager;
 
-  const readings = READINGS.filter(
-    (r) =>
-      familySupports(family, r.command) &&
-      (!r.families || r.families.includes(family)),
-  );
+  const readings = READINGS.filter((r) => r.supported(family));
 
   const run = async (reading: Reading) => {
     if (!manager) return;
@@ -166,9 +244,13 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
     }
   };
 
-  const act = async (label: string, fn: () => Promise<void>) => {
+  const act = async (
+    label: string,
+    fn: (m: BLEDeviceManager) => Promise<void>,
+  ) => {
+    if (!manager) return;
     try {
-      await fn();
+      await fn(manager);
       log(`${label}: sent`);
     } catch (error) {
       log(
@@ -176,6 +258,57 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
       );
     }
   };
+
+  const toggle = (
+    setting: Setting,
+    title: string,
+    fn: (m: BLEDeviceManager, on: boolean) => Promise<void>,
+    note?: string,
+  ) =>
+    can(setting) && (
+      <div className="form-group" key={setting}>
+        <span>{title}</span>
+        <button
+          disabled={disabled}
+          onClick={() => act(`${title} on`, (m) => fn(m, true))}
+        >
+          On
+        </button>
+        <button
+          disabled={disabled}
+          onClick={() => act(`${title} off`, (m) => fn(m, false))}
+        >
+          Off
+        </button>
+        {note && <small> {note}</small>}
+      </div>
+    );
+
+  const numberSetting = (
+    setting: Setting,
+    title: string,
+    key: string,
+    fn: (m: BLEDeviceManager, n: number) => Promise<void>,
+  ) =>
+    can(setting) && (
+      <div className="form-group" key={setting}>
+        <label htmlFor={`family-${key}`}>{title}</label>
+        <input
+          id={`family-${key}`}
+          type="number"
+          value={v(key)}
+          onChange={set(key)}
+        />
+        <button
+          disabled={disabled}
+          onClick={() => act(title, (m) => fn(m, Number(v(key))))}
+        >
+          Set
+        </button>
+      </div>
+    );
+
+  const modes = MODES[family] ?? MODES.default;
 
   return (
     <div id="family-status-tab" className="tab-pane active">
@@ -189,10 +322,7 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
       {readings.map((reading) => (
         <div key={reading.title} className="config-section">
           <h3>{reading.title}</h3>
-          <button
-            onClick={() => run(reading)}
-            disabled={!isConnected || !manager}
-          >
+          <button onClick={() => run(reading)} disabled={disabled}>
             Read {reading.title.toLowerCase()}
           </button>
           {errors[reading.title] && (
@@ -211,26 +341,204 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
         </div>
       ))}
 
-      {(familySupports(family, "SET_DOD") ||
-        familySupports(family, "SET_LED")) && (
+      {(can("timePeriods") || can("miniSchedule")) && (
+        <div className="config-section">
+          <h3>
+            {can("timePeriods")
+              ? "Write a time period"
+              : "Write a schedule slot"}
+          </h3>
+          <div className="form-group">
+            <label htmlFor="family-slot">Slot (from 0)</label>
+            <input
+              id="family-slot"
+              type="number"
+              value={v("slot")}
+              onChange={set("slot")}
+            />
+            <label htmlFor="family-slot-start">Start</label>
+            <input
+              id="family-slot-start"
+              type="time"
+              value={v("slotStart")}
+              onChange={set("slotStart")}
+            />
+            <label htmlFor="family-slot-end">End</label>
+            <input
+              id="family-slot-end"
+              type="time"
+              value={v("slotEnd")}
+              onChange={set("slotEnd")}
+            />
+            <label htmlFor="family-slot-days">
+              Weekday mask (127 = every day)
+            </label>
+            <input
+              id="family-slot-days"
+              type="number"
+              value={v("slotDays")}
+              onChange={set("slotDays")}
+            />
+            <label htmlFor="family-slot-power">
+              Power (W
+              {can("timePeriods") && family !== "jupiter"
+                ? "; negative charges, -1 follows the meter"
+                : ""}
+              )
+            </label>
+            <input
+              id="family-slot-power"
+              type="number"
+              value={v("slotPower")}
+              onChange={set("slotPower")}
+            />
+            {can("miniSchedule") && (
+              <>
+                <label htmlFor="family-slot-action">Action</label>
+                <select
+                  id="family-slot-action"
+                  value={v("slotAction")}
+                  onChange={set("slotAction")}
+                >
+                  <option value="idle">idle</option>
+                  <option value="charge">charge</option>
+                  <option value="discharge">discharge</option>
+                  <option value="followMeter">follow the meter</option>
+                </select>
+              </>
+            )}
+            <label>
+              <input
+                type="checkbox"
+                checked={v("slotEnabled") === "1"}
+                onChange={(e) =>
+                  setValues((p) => ({
+                    ...p,
+                    slotEnabled: e.target.checked ? "1" : "0",
+                  }))
+                }
+              />{" "}
+              Enabled
+            </label>
+            <button
+              disabled={disabled}
+              onClick={() =>
+                act("Time period", (m) => {
+                  const base = {
+                    enabled: v("slotEnabled") === "1",
+                    start: parseTime(v("slotStart")),
+                    end: parseTime(v("slotEnd")),
+                    weekdays: Number(v("slotDays")),
+                    power: Number(v("slotPower")),
+                  };
+                  return can("miniSchedule")
+                    ? m.setMiniScheduleSlot(Number(v("slot")), {
+                        ...base,
+                        action: v("slotAction") as MiniSlotAction,
+                      })
+                    : m.setTimePeriod(Number(v("slot")), base);
+                })
+              }
+            >
+              Write
+            </button>
+          </div>
+        </div>
+      )}
+
+      {can("workingMode") && (
         <div className="config-section">
           <h3>Settings</h3>
-          {familySupports(family, "SET_DOD") && (
+          <div className="form-group">
+            <label htmlFor="family-mode">Working mode</label>
+            <select id="family-mode" value={v("mode")} onChange={set("mode")}>
+              {modes.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <button
+              disabled={disabled}
+              onClick={() =>
+                act("Working mode", (m) =>
+                  m.setWorkingMode(v("mode") as WorkingMode),
+                )
+              }
+            >
+              Set
+            </button>
+          </div>
+          {numberSetting(
+            "depthOfDischarge",
+            "Depth of discharge (%)",
+            "dod",
+            (m, n) => m.setDepthOfDischarge(n),
+          )}
+          {numberSetting(
+            "maxChargePower",
+            "Max charging power (W)",
+            "maxCharge",
+            (m, n) => m.setMaxChargePower(n),
+          )}
+          {numberSetting(
+            "maxDischargePower",
+            "Max discharging power (W)",
+            "maxDischarge",
+            (m, n) => m.setMaxDischargePower(n),
+          )}
+          {numberSetting(
+            "upsChargePower",
+            "UPS charge power (W)",
+            "ups",
+            (m, n) => m.setUpsChargePower(n),
+          )}
+          {can("peakShaving") && (
             <div className="form-group">
-              <label htmlFor="family-dod">Depth of discharge (%)</label>
+              <label htmlFor="family-peak">Peak shaving (W)</label>
               <input
-                id="family-dod"
+                id="family-peak"
                 type="number"
-                min={30}
-                max={family === "jupiter" ? 90 : 88}
-                value={dod}
-                onChange={(e) => setDod(Number(e.target.value))}
+                value={v("peak")}
+                onChange={set("peak")}
               />
               <button
-                disabled={!isConnected || !manager}
+                disabled={disabled}
                 onClick={() =>
-                  act("Depth of discharge", () =>
-                    manager!.setDepthOfDischarge(dod),
+                  act("Peak shaving", (m) =>
+                    m.setPeakShaving(Number(v("peak"))),
+                  )
+                }
+              >
+                Set
+              </button>
+              <button
+                disabled={disabled}
+                onClick={() =>
+                  act("Peak shaving off", (m) => m.setPeakShaving(null))
+                }
+              >
+                Off
+              </button>
+            </div>
+          )}
+          {can("antiReverse") && (
+            <div className="form-group">
+              <label htmlFor="family-ar">Anti-reverse power (W, 0 = off)</label>
+              <input
+                id="family-ar"
+                type="number"
+                value={v("antiReverse")}
+                onChange={set("antiReverse")}
+              />
+              <button
+                disabled={disabled}
+                onClick={() =>
+                  act("Anti-reverse", (m) =>
+                    m.setAntiReverse(
+                      Number(v("antiReverse")) > 0,
+                      Number(v("antiReverse")),
+                    ),
                   )
                 }
               >
@@ -238,25 +546,149 @@ const FamilyStatusTab: React.FC<FamilyStatusTabProps> = ({
               </button>
             </div>
           )}
-          {familySupports(family, "SET_LED") && (
+          {can("powerLimits") && (
             <div className="form-group">
-              <span>Status LED</span>
-              <button
-                disabled={!isConnected || !manager}
-                onClick={() => act("LED on", () => manager!.setStatusLed(true))}
+              <label htmlFor="family-feedin">Feed-in limit</label>
+              <select
+                id="family-feedin"
+                value={v("feedIn")}
+                onChange={set("feedIn")}
               >
-                On
-              </button>
+                <option value="0">800 W</option>
+                <option value="1">higher (1250 W on inverter 270)</option>
+              </select>
+              <label htmlFor="family-gridcharge">Grid charging</label>
+              <select
+                id="family-gridcharge"
+                value={v("gridCharge")}
+                onChange={set("gridCharge")}
+              >
+                <option value="0">1250 W</option>
+                <option value="1">800 W</option>
+              </select>
               <button
-                disabled={!isConnected || !manager}
+                disabled={disabled}
                 onClick={() =>
-                  act("LED off", () => manager!.setStatusLed(false))
+                  act("Power limits", (m) =>
+                    m.setPowerLimits(
+                      v("feedIn") === "1",
+                      v("gridCharge") === "1",
+                    ),
+                  )
                 }
               >
-                Off
+                Set
               </button>
             </div>
           )}
+          {can("localApi") && (
+            <div className="form-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={v("apiEnabled") === "1"}
+                  onChange={(e) =>
+                    setValues((p) => ({
+                      ...p,
+                      apiEnabled: e.target.checked ? "1" : "0",
+                    }))
+                  }
+                />{" "}
+                Local API, port
+              </label>
+              <input
+                id="family-api-port"
+                type="number"
+                value={v("apiPort")}
+                onChange={set("apiPort")}
+              />
+              {family === "venusMini" && (
+                <>
+                  <label htmlFor="family-api-remote">remote port</label>
+                  <input
+                    id="family-api-remote"
+                    type="number"
+                    value={v("apiRemotePort")}
+                    onChange={set("apiRemotePort")}
+                  />
+                </>
+              )}
+              <button
+                disabled={disabled}
+                onClick={() =>
+                  act("Local API", (m) =>
+                    m.setLocalApi(
+                      v("apiEnabled") === "1",
+                      Number(v("apiPort")),
+                      Number(v("apiRemotePort")),
+                    ),
+                  )
+                }
+              >
+                Set
+              </button>
+            </div>
+          )}
+          {can("meterIp") && (
+            <div className="form-group">
+              <label htmlFor="family-meter-ip">
+                Meter IP (P1 meter, EcoTracker)
+              </label>
+              <input
+                id="family-meter-ip"
+                type="text"
+                value={v("meterIp")}
+                onChange={set("meterIp")}
+              />
+              <button
+                disabled={disabled}
+                onClick={() =>
+                  act("Meter IP", (m) => m.setMeterIp(v("meterIp")))
+                }
+              >
+                Set
+              </button>
+            </div>
+          )}
+          {toggle("statusLed", "Status LED", (m, on) => m.setStatusLed(on))}
+          {toggle("surplusFeedIn", "Surplus feed-in", (m, on) =>
+            m.setSurplusFeedIn(on),
+          )}
+          {toggle("backup", "Backup output", (m, on) => m.setBackup(on))}
+          {toggle(
+            "bluetooth",
+            "Bluetooth",
+            (m, on) => m.setBluetooth(on),
+            "Off ends this connection.",
+          )}
+          <div className="form-group">
+            {can("phaseDetection") && (
+              <button
+                disabled={disabled}
+                onClick={() =>
+                  act("Phase detection", (m) => m.startPhaseDetection())
+                }
+              >
+                Start phase detection
+              </button>
+            )}
+            {can("clock") && (
+              <button
+                disabled={disabled}
+                onClick={() => act("Clock", (m) => m.setClock(new Date()))}
+              >
+                Set the clock to now
+              </button>
+            )}
+            {can("restart") && (
+              <button
+                disabled={disabled}
+                onClick={() => act("Restart", (m) => m.restartDevice())}
+              >
+                Restart
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

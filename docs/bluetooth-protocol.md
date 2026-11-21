@@ -43,13 +43,11 @@ rather than the control board; their protocol is not covered here.
 | `0x03` | none | status block, see below | all (decoded: every family but the meters) |
 | `0x04` | `0x01` | `type=…,id=…,mac=…` plus versions, as text | all (the Venus E 3.0/A/D only answer with the `0x01`) |
 | `0x05` | `ssid<.,.>password` | — | all |
-| `0x08` | none | name of the configured Wi-Fi network, as text | `venus`, `venus3` |
+| `0x08` | none | name of the configured Wi-Fi network, as text | `venus`, `venus3`, `venusMini` |
 | `0x0B` | none | clock: year (u16), month, day, hour, minute, second, weekday (0 = Sunday) | `venus3`, `jupiter` |
 | `0x0D` | none | grid and inverter, see below | `venus3` |
 | `0x14` | none | battery data with cells, see below | `venus`, `venus3`, `venusMini`, `jupiter` |
-| `0x24` | none | `ip:…,gate:…,mask:…,dns:…` | `venus`, `venusMini` |
-| `0x54` | percent (u8) | — sets the depth of discharge | `venus3` (30–88), `jupiter` (30–90) |
-| `0x59` | `0x01` on, `0x00` off | — sets the status LED | `venus3` |
+| `0x24` | `00` | `ip:…,gate:…,mask:…,dns:…` | every Venus, `venusMini`; the Jupiter answers `29 00` |
 
 ### Commands never to send
 
@@ -60,6 +58,47 @@ rather than the control board; their protocol is not covered here.
 
 A wrong image can leave the device without Wi-Fi or Bluetooth. The library
 refuses both, also through `sendRawBytes`.
+
+## Settings and schedules
+
+The same setting often has a different command number per family. Payloads
+are complete as listed: the Venus E Mini does not check the length of what it
+receives and fills a short payload with leftover bytes. "`0A 0B 0C`" is a
+fixed marker some Venus and Jupiter commands expect.
+
+| Setting | Venus C/E, Venus E 3.0/A/D | Jupiter | Venus E Mini |
+|---|---|---|---|
+| Working mode | `09 00` auto, `09 01` manual, `09 05 01` AI | `09 01` auto, `09 02` manual | `02 <m>`: 0 auto, 1 UPS, 2 manual, 3 AI |
+| Read schedule | `0A 01` → 10 slots of 8 bytes | `0A 01` → 5 slots used | `0A 01` → mode + 6 slots of 9 bytes |
+| Write one slot | `09 01 <i> <slot>` | `09 02 <i> <slot>` (also selects manual) | `A0+i <9 bytes>` |
+| Depth of discharge | `54 <%>` (E 3.0/A/D, 30–88) | `54 <%>` (30–90) | `44 <%>` (30–90) |
+| Status LED | `59 <1 on / 0 off>` (E 3.0/A/D) | — | `27 <0 on / 1 off>` |
+| Bluetooth advertising | `53 0A <1/0>` (E 3.0/A/D) | `55 0A <1/0>` | `26 <2 on / 1 lock>` |
+| Surplus feed-in | `41 <1/0>` (not reported back) | `22 <1/0>` | — |
+| Local API | `28 <en> <port u16>` | — | `2D <en> <port u16> <remote port u16>` |
+| Max charge / discharge power | `16 <W u16>` / `17 <W u16>` (E 3.0/A/D) | — | — |
+| Peak shaving | `29 01 <W u16>`, off `29 00` (E 3.0/A/D) | — | — |
+| Backup output | `0F <1/0>` | — | — |
+| Meter IP (P1, EcoTracker) | `21 0A <IP text>` | `25 0A <IP text>` | `21 0A <IP text>` |
+| Phase detection | `1D 0A 0B 0C` (E 3.0/A/D) | `20 0A 0B 0C` | `20 01` |
+| Clock | `0B <year u16> <month> <day> <h> <m> <s>` (E 3.0/A/D) | same | `46 <year−2000> <month> <day> <h> <m> <s>` |
+| Cloud server | `02 <n>`: 0 EU, 2 China/other, 3 test, 4 pre-release (E 3.0/A/D) | same | `2A <n>`: 0 EU, 1 US, 2 dev, 3 staging |
+| Power limits | — | — | `28 <feed-in: 0 800 W, 1 higher> <grid charge: 0 1250 W, 1 800 W>` |
+| UPS charge power | — | — | `2C <W u16>` |
+| Anti-reverse | — | — | `35 <en> 02 <W u16>` |
+| Restart | — | — | `2B 01` |
+
+Schedule slot, Venus and Jupiter (8 bytes): start hour, start minute, end
+hour, end minute, weekday mask, power (i16, W; Venus: positive discharges,
+negative charges, −1 follows the meter; Jupiter: discharge power), enabled.
+
+Schedule slot, Venus E Mini, as written (9 bytes): enabled, power (u16, W),
+action (0 idle, 1 charge, 2 discharge, 3 follow the meter), start hour, start
+minute, end hour, end minute (23:59 runs to midnight), weekday mask (bit 0 =
+Monday). The `0A` reply stores each slot with the action before the power.
+
+`0x13` (error history) can exceed 255 bytes on a Venus; its length byte then
+holds the length modulo 256. The library does not request it.
 
 ## Reply layouts
 
@@ -106,9 +145,33 @@ at 3 (×0.1 V), AC power i16 at 5 (W).
 
 ### Venus E Mini
 
-`0x03` status (120 bytes): grid frequency u16 at 0 (×0.01 Hz), grid voltage
-u16 at 2 (×0.1 V), remaining energy u16 at 14 (Wh), state of charge u16 at 18
-(×0.1 %), AC power i16 at 34 (W).
+`0x03` status (120 bytes):
+
+| Offset | Type | Field |
+|---|---|---|
+| 0 | u16 | grid frequency, ×0.01 Hz |
+| 2 | u16 | grid voltage, ×0.1 V |
+| 14 | u32 | remaining energy, Wh |
+| 18 | u16 | state of charge, ×0.1 % |
+| 24 | u8 | working mode (0 auto, 1 UPS, 2 manual, 3 AI) |
+| 25 | u8 | meter answering |
+| 34 | i32 | AC power, W |
+| 42 | u8 | depth of discharge, % |
+| 47 | i16 | battery power, W (negative: discharging) |
+| 54 | u8 | Wi-Fi signal, −dBm |
+| 91, 93, 95 | u16 | inverter, control and DC/DC firmware versions |
+| 97 | u8 | meter type code |
+| 100 | u8 | LED (0 = on) |
+| 101 | u8 | feed-in limit (1 = the higher one) |
+| 102 | u8 | detected meter phase |
+| 103 | u8 | cloud server |
+| 112 | u16 | UPS charge power, W |
+| 114, 115, 117 | u8, u16, u16 | local API enabled, port, remote port |
+| 119 | u8 | grid charge limited to 800 W |
+
+`0x1A` meter power (19 bytes): phase A, B, C and total power (i16, W) at 0,
+2, 4, 6; detected phase at 10, meter type code at 11, meter answering at 12,
+the meter's MAC at 13.
 
 `0x14` battery (44 bytes):
 
@@ -195,6 +258,14 @@ Fields are listed only where that left no doubt.
 The Venus C/E runs its 30 kHz power-stage control loop on the control board,
 which the emulator executes at about a ninth of real time; its run took half
 an hour.
+
+The settings, schedules and the Mini's status fields were then read out of
+the Marstek app (1.7.0) as a list of the commands it sends and the replies it
+parses, and each one was confirmed on the emulated firmware by sending the
+app's payload and checking the device's own status afterwards. Where the app
+and the firmware disagreed, the firmware won (the Mini's phase mode is
+`0x19`, not the `0x13` the app sends; its factory reset does not work over
+Bluetooth).
 
 The library was then tested end to end against the emulated Venus E 3.0,
 Jupiter and Venus E Mini. Real devices may run newer firmware; if a value

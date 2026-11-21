@@ -1,7 +1,6 @@
 import {
   ALL_NAME_PREFIXES,
   assertCommandAllowed,
-  createDepthOfDischargePayload,
   decodeFamilyMessage,
   detectDeviceFamily,
   familySupports,
@@ -374,7 +373,7 @@ describe("shared helpers", () => {
   });
 
   it("knows which family supports which command", () => {
-    expect(familySupports("venus3", "SET_DOD")).toBe(true);
+    expect(familySupports("jupiter", "GET_NETWORK_INFO")).toBe(true);
     expect(familySupports("meter", "BATTERY_INFO")).toBe(false);
     expect(familySupports(undefined, "DEVICE_INFO")).toBe(false);
   });
@@ -385,16 +384,5 @@ describe("shared helpers", () => {
     );
     expect(() => assertCommandAllowed("meter", 0x29)).toThrow();
     expect(() => assertCommandAllowed("venus3", 0x17)).not.toThrow();
-  });
-
-  it("validates the depth of discharge per family", () => {
-    expect(createDepthOfDischargePayload("venus3", 80)).toEqual(
-      new Uint8Array([80]),
-    );
-    expect(() => createDepthOfDischargePayload("venus3", 90)).toThrow();
-    expect(createDepthOfDischargePayload("jupiter", 90)).toEqual(
-      new Uint8Array([90]),
-    );
-    expect(() => createDepthOfDischargePayload("jupiter", 20)).toThrow();
   });
 });

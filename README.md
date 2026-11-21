@@ -99,9 +99,19 @@ known about each:
 | Grid, PV and battery (`getSystemInfo`) | | | | | ✓ | |
 | Grid and inverter (`getInverterInfo`) | | | ✓ | | | |
 | Device clock (`getDeviceTime`) | | | ✓ | | ✓ | |
-| Wi-Fi network / IP (`getWifiSsid` / `getNetworkInfo`) | | ✓ / ✓ | ✓ / | / ✓ | | |
-| Depth of discharge (`setDepthOfDischarge`) | ✓ | | ✓ | | ✓ | |
-| Status LED (`setStatusLed`) | | | ✓ | | | |
+| Wi-Fi network / IP (`getWifiSsid` / `getNetworkInfo`) | | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ | / ✓ | |
+| Depth of discharge (`setDepthOfDischarge`) | ✓ | | ✓ | ✓ | ✓ | |
+| Status LED (`setStatusLed`) | | | ✓ | ✓ | | |
+| Working mode (`setWorkingMode`) | | ✓ | ✓ | ✓ | ✓ | |
+| Schedule (`getTimePeriods`/`setTimePeriod`, Mini: `getMiniSchedule`/`setMiniScheduleSlot`) | timers | ✓ | ✓ | ✓ | ✓ | |
+| Bluetooth advertising (`setBluetooth`) | | | ✓ | ✓ | ✓ | |
+| Surplus feed-in (`setSurplusFeedIn`) | | ✓ | ✓ | | ✓ | |
+| Local API (`setLocalApi`) | | ✓ | ✓ | ✓ | | |
+| Meter IP (`setMeterIp`) | | ✓ | ✓ | ✓ | ✓ | |
+| Phase detection, clock, cloud server | | | ✓ | ✓ | ✓ | |
+| Max charge/discharge power, peak shaving (`setMaxChargePower`, …) | | | ✓ | | | |
+| Backup output (`setBackup`) | | ✓ | ✓ | | | |
+| Power limits, UPS power, anti-reverse, restart, meter power | | | | ✓ | | |
 
 ```typescript
 const manager = new BLEDeviceManager();

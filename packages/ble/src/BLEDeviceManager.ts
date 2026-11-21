@@ -12,6 +12,62 @@ import {
   MQTTConfig,
   HMDeviceProtocol,
   DIAGNOSIS_VARIANT,
+  ALL_NAME_PREFIXES,
+  MARSTEK_COMMANDS,
+  assertCommandAllowed,
+  createAntiReverseCommand,
+  createBackupCommand,
+  createBluetoothCommand,
+  createClockCommand,
+  createCloudServerCommand,
+  createDepthOfDischargeCommand,
+  createLocalApiCommand,
+  createMaxChargePowerCommand,
+  createMaxDischargePowerCommand,
+  createMeterIpCommand,
+  createMeterPowerCommand,
+  createMiniScheduleSlotCommand,
+  createNetworkInfoCommand,
+  createPeakShavingCommand,
+  createPhaseDetectionCommand,
+  createPowerLimitsCommand,
+  createReadMiniScheduleCommand,
+  createReadTimePeriodsCommand,
+  createRestartCommand,
+  createStatusLedCommand,
+  createSurplusFeedInCommand,
+  createTimePeriodCommand,
+  createUpsChargePowerCommand,
+  createWorkingModeCommand,
+  createMeterDirectionCommand,
+  createMeterReaderCommand,
+  createMeterZeroCalibrationCommand,
+  decodeFamilyMessage,
+  detectDeviceFamily,
+  detectMeterVariant,
+  familySupports,
+  parseKeyValuePayload,
+} from "@tomquist/hmjs-protocol";
+import type {
+  FamilyCommand,
+  MeterPower,
+  MeterStatus,
+  MeterPhaseReadings,
+  MiniScheduleSlot,
+  TimePeriod,
+  WorkingMode,
+  BatteryInfo,
+  DeviceDateTime,
+  DeviceFamily,
+  FamilyMessage,
+  JupiterRuntimeInfo,
+  JupiterSystemInfo,
+  NetworkInfo,
+  Venus3InverterInfo,
+  Venus3RuntimeInfo,
+  VenusRuntimeInfo,
+  VenusMiniRuntimeInfo,
+  MeterVariant,
 } from "@tomquist/hmjs-protocol";
 import {
   BLEManagerOptions,
@@ -30,9 +86,16 @@ type EventCallbackArgs = {
   cellInfo: [CellInfo];
   timerInfo: [TimerInfoResponse];
   rawData: [Uint8Array];
+  familyMessage: [FamilyMessage];
+  familyDetected: [DeviceFamily];
 };
 
 type EventType = keyof EventCallbackArgs;
+
+/** Decoded data per family reply kind */
+type FamilyData = {
+  [M in FamilyMessage as M["kind"]]: M["data"];
+};
 
 type EventMap = {
   [K in EventType]: Array<EventCallback<EventCallbackArgs[K]>>;
@@ -50,6 +113,23 @@ class BLEDeviceManager {
   private statusCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
   private connected: boolean = false;
   private connecting: boolean = false;
+
+  // Family of the connected device; B2500 when unknown, as before
+  private family: DeviceFamily | undefined = undefined;
+  // CT002 or CT003, for a meter
+  private meterVariant: MeterVariant | undefined = undefined;
+
+  // Every connect() and disconnect() starts a new generation; a reconnect
+  // scheduled under an older one stands down instead of taking over.
+  private generation = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Reads waiting for their reply; rejected when the connection ends
+  private pendingReads = new Set<(error: Error) => void>();
+  // Internal notification listeners (reply matching), apart from the public
+  // rawData event, whose listeners get a copy of each frame
+  private frameListeners = new Set<(frame: Uint8Array) => void>();
+  // Whether the caller chose the name prefix; otherwise it follows the type
+  private readonly explicitPrefix: boolean;
 
   // Options with defaults
   private options: Required<Omit<BLEManagerOptions, "bluetooth">> & {
@@ -111,6 +191,8 @@ class BLEDeviceManager {
     timerInfo: [],
     error: [],
     rawData: [],
+    familyMessage: [],
+    familyDetected: [],
   };
 
   // Notification handlers
@@ -122,12 +204,17 @@ class BLEDeviceManager {
    * @param options Configuration options
    */
   constructor(options: BLEManagerOptions = {}) {
+    this.explicitPrefix = options.deviceNamePrefix !== undefined;
     // Set default options
     this.options = {
       autoReconnect:
         options.autoReconnect !== undefined ? options.autoReconnect : true,
       reconnectDelay: options.reconnectDelay || 2000,
-      deviceNamePrefix: options.deviceNamePrefix || "HM_",
+      // Without an explicit prefix, offer every Marstek device. The Tronic
+      // firmware keeps the old default.
+      deviceNamePrefix:
+        options.deviceNamePrefix ??
+        (options.deviceType === "tronic" ? "HM_" : [...ALL_NAME_PREFIXES]),
       acceptAllDevices: options.acceptAllDevices ?? false,
       logger: options.logger || console.log,
       bluetooth: options.bluetooth,
@@ -269,6 +356,12 @@ class BLEDeviceManager {
       ...this.options,
       ...options,
     };
+    if (options.deviceNamePrefix === undefined && !this.explicitPrefix) {
+      // the default follows the type being scanned for: the Tronic firmware
+      // keeps the old one
+      scanOptions.deviceNamePrefix =
+        scanOptions.deviceType === "tronic" ? "HM_" : [...ALL_NAME_PREFIXES];
+    }
 
     const bluetooth = await this.resolveBluetooth(scanOptions.bluetooth);
 
@@ -276,7 +369,9 @@ class BLEDeviceManager {
     if (scanOptions.acceptAllDevices) {
       this.log("Accepting all Bluetooth devices");
     } else {
-      this.log(`Using device name prefix: "${scanOptions.deviceNamePrefix}"`);
+      this.log(
+        `Using device name prefix: ${JSON.stringify(scanOptions.deviceNamePrefix)}`,
+      );
     }
 
     try {
@@ -289,7 +384,10 @@ class BLEDeviceManager {
             optionalServices: [serviceUUID],
           }
         : {
-            filters: [{ namePrefix: scanOptions.deviceNamePrefix }],
+            filters: (Array.isArray(scanOptions.deviceNamePrefix)
+              ? scanOptions.deviceNamePrefix
+              : [scanOptions.deviceNamePrefix]
+            ).map((namePrefix) => ({ namePrefix })),
             optionalServices: [serviceUUID],
           };
       const device = await bluetooth.requestDevice(requestOptions);
@@ -328,6 +426,8 @@ class BLEDeviceManager {
 
     this.connecting = true;
     this.explicitDisconnect = false;
+    // a reconnect still waiting for its turn would take over this connection
+    this.cancelReconnect();
 
     try {
       // Merge connection options with defaults
@@ -343,6 +443,11 @@ class BLEDeviceManager {
       }
 
       this.device = device;
+      // A new device: forget the previous one's family. The name's is
+      // announced once the connection is ready.
+      this.family = undefined;
+      this.meterVariant = detectMeterVariant({ name: device.name });
+      const family = detectDeviceFamily({ name: device.name });
 
       // Set up disconnect listener
       this.device.addEventListener(
@@ -379,6 +484,7 @@ class BLEDeviceManager {
 
       this.connected = true;
       this.connecting = false;
+      this.setFamily(family);
 
       this._triggerEvent("connect", this.device);
       this.log("Connected successfully");
@@ -399,12 +505,22 @@ class BLEDeviceManager {
    * Disconnect from the BLE device
    */
   public disconnect(): void {
+    this.cancelReconnect();
     if (this.device && this.device.gatt && this.device.gatt.connected) {
       this.log("Disconnecting from device...");
       this.explicitDisconnect = true;
       this.device.gatt.disconnect();
     } else {
       this.onDisconnected();
+    }
+  }
+
+  /** Drop a scheduled reconnect, and make one in progress stand down. */
+  private cancelReconnect(): void {
+    this.generation++;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 
@@ -422,6 +538,11 @@ class BLEDeviceManager {
     this.commandCharacteristic = null;
     this.statusCharacteristic = null;
 
+    // Reads waiting for a reply will not get one from this connection
+    for (const cancel of [...this.pendingReads]) {
+      cancel(new Error("Disconnected before the device replied"));
+    }
+
     // Trigger disconnect event
     this._triggerEvent("disconnect");
 
@@ -434,7 +555,12 @@ class BLEDeviceManager {
         `Auto-reconnect is enabled. Attempting to reconnect in ${this.options.reconnectDelay}ms...`,
       );
 
-      setTimeout(async () => {
+      const generation = this.generation;
+      // a newer connect() or disconnect() owns the manager now
+      const superseded = () => generation !== this.generation;
+      this.reconnectTimer = setTimeout(async () => {
+        this.reconnectTimer = null;
+        if (superseded()) return;
         try {
           this.log("Reconnecting...");
           this.connecting = true;
@@ -445,18 +571,20 @@ class BLEDeviceManager {
           // Get primary service (UUID depends on device type)
           const uuids = this.getDeviceUUIDs(this.options.deviceType);
           const service = await server.getPrimaryService(uuids.service);
-
-          this.commandCharacteristic = await service.getCharacteristic(
-            uuids.command,
-          );
-
-          this.statusCharacteristic = await service.getCharacteristic(
-            uuids.status,
-          );
+          const command = await service.getCharacteristic(uuids.command);
+          const status = await service.getCharacteristic(uuids.status);
+          await status.startNotifications();
+          if (superseded()) {
+            this.connecting = false;
+            if (lastDevice !== this.device) lastDevice.gatt?.disconnect();
+            this.log("Reconnect abandoned: another connection took over");
+            return;
+          }
 
           // Setup notification handler
-          await this.statusCharacteristic.startNotifications();
-          this.statusCharacteristic.addEventListener(
+          this.commandCharacteristic = command;
+          this.statusCharacteristic = status;
+          status.addEventListener(
             "characteristicvaluechanged",
             this._handleStatusNotification.bind(this),
           );
@@ -466,9 +594,12 @@ class BLEDeviceManager {
           this.connecting = false;
 
           this._triggerEvent("reconnect", this.device);
+          // the same device: its family again, for listeners that reset it
+          if (this.family) this._triggerEvent("familyDetected", this.family);
           this.log("Reconnected successfully");
         } catch (error) {
           this.connecting = false;
+          if (superseded()) return;
           this.device = null;
           this._triggerEvent("error", error);
           this.log(
@@ -494,8 +625,30 @@ class BLEDeviceManager {
       return;
     }
 
-    // Always emit raw data event for advanced mode
-    this._triggerEvent("rawData", new Uint8Array(value.buffer));
+    const frame = new Uint8Array(
+      value.buffer,
+      value.byteOffset,
+      value.byteLength,
+    ).slice();
+
+    // Always emit raw data event for advanced mode; its listeners get their
+    // own copy, so what they do with it cannot touch the decoding below
+    this._triggerEvent("rawData", frame.slice());
+    for (const listener of [...this.frameListeners]) listener(frame);
+
+    // Devices other than the B2500 give the command numbers other meanings,
+    // so their replies are decoded with the family's own layout.
+    if (this.family && this.family !== "b2500") {
+      const msg = decodeFamilyMessage(this.family, frame);
+      if (msg) {
+        if (msg.kind === "deviceInfo") {
+          this.noteDeviceType(msg.data.type);
+          this._triggerEvent("deviceInfo", msg.data);
+        }
+        this._triggerEvent("familyMessage", msg);
+      }
+      return;
+    }
 
     // Attempt to determine what type of response this is
     try {
@@ -506,7 +659,15 @@ class BLEDeviceManager {
           this._triggerEvent("runtimeInfo", msg.data);
           break;
         case COMMAND_TYPES.DEVICE_INFO:
+          this.noteDeviceType(msg.data.type);
           this._triggerEvent("deviceInfo", msg.data);
+          if (this.family && this.family !== "b2500") {
+            this._triggerEvent("familyMessage", {
+              kind: "deviceInfo",
+              command: COMMAND_TYPES.DEVICE_INFO,
+              data: parseKeyValuePayload(frame.subarray(4, frame.length - 1)),
+            });
+          }
           break;
         case COMMAND_TYPES.CELL_INFO:
           this._triggerEvent("cellInfo", msg.data);
@@ -580,6 +741,8 @@ class BLEDeviceManager {
 
     const cmdOptions = { ...defaultOptions, ...options };
 
+    assertCommandAllowed(this.family, commandType);
+
     try {
       // Create the command message using the protocol
       const command = this.protocol.createCommandMessage(commandType, payload);
@@ -618,7 +781,9 @@ class BLEDeviceManager {
         reject(new Error("Command timed out"));
       }, timeout);
       this.on("deviceInfo", eventHandler);
-      this.sendCommand(COMMAND_TYPES.DEVICE_INFO, null).catch((error) => {
+      // The Venus E 3.0/A/D only answer with the 0x01 argument the app sends;
+      // the B2500 answers either way.
+      this.sendCommand(COMMAND_TYPES.DEVICE_INFO, [0x01]).catch((error) => {
         this.off("deviceInfo", eventHandler);
         clearTimeout(timeoutId);
         reject(error);
@@ -633,6 +798,7 @@ class BLEDeviceManager {
   public async getRuntimeInfo(options?: {
     timeout?: number;
   }): Promise<RuntimeInfo | null> {
+    this.requireB2500("getRuntimeInfo");
     const { timeout = 5000 } = options ?? {};
     return new Promise((resolve, reject) => {
       const eventHandler = (data: RuntimeInfo) => {
@@ -660,6 +826,7 @@ class BLEDeviceManager {
   public async getCellInfo(options?: {
     timeout?: number;
   }): Promise<CellInfo | null> {
+    this.requireB2500("getCellInfo");
     const { timeout = 5000 } = options ?? {};
     return new Promise((resolve, reject) => {
       const eventHandler = (data: CellInfo) => {
@@ -687,6 +854,7 @@ class BLEDeviceManager {
   public async getTimers(options?: {
     timeout?: number;
   }): Promise<TimerInfoResponse> {
+    this.requireB2500("getTimers");
     const { timeout = 5000 } = options ?? {};
     return new Promise((resolve, reject) => {
       const eventHandler = (data: TimerInfoResponse) => {
@@ -722,6 +890,7 @@ class BLEDeviceManager {
    * @param timers Timer entries to write (one per device slot)
    */
   public async setTimers(timers: TimerInfo[]): Promise<void> {
+    this.requireB2500("setTimers");
     const payload = this.protocol.createTimerConfigPayload(timers);
     await this.sendCommand(COMMAND_TYPES.SET_TIMERS, payload);
   }
@@ -751,6 +920,7 @@ class BLEDeviceManager {
    * library does not yet parse it.
    */
   public async getWifiInfo(): Promise<void> {
+    this.requireB2500("getWifiInfo");
     await this.sendCommand(COMMAND_TYPES.GET_WIFI_INFO, [0x01]);
   }
 
@@ -761,6 +931,7 @@ class BLEDeviceManager {
    * does not yet parse it.
    */
   public async getErrorInfo(): Promise<void> {
+    this.requireB2500("getErrorInfo");
     await this.sendCommand(COMMAND_TYPES.GET_ERROR_INFO, [0x01]);
   }
 
@@ -773,6 +944,7 @@ class BLEDeviceManager {
    * @param percent Depth of discharge, 0-100
    */
   public async setDod(percent: number): Promise<void> {
+    this.requireB2500("setDod");
     const payload = this.protocol.createDodPayload(percent);
     await this.sendCommand(COMMAND_TYPES.SET_DOD, payload);
   }
@@ -786,6 +958,7 @@ class BLEDeviceManager {
    * @param watts Threshold in watts (0-65535)
    */
   public async setDischargeThreshold(watts: number): Promise<void> {
+    this.requireB2500("setDischargeThreshold");
     const payload = this.protocol.createDischargeThresholdPayload(watts);
     await this.sendCommand(COMMAND_TYPES.SET_DISCHARGE_THRESHOLD, payload);
   }
@@ -795,6 +968,7 @@ class BLEDeviceManager {
    * @param mode Value from `CHARGE_MODE`
    */
   public async setChargeMode(mode: number): Promise<void> {
+    this.requireB2500("setChargeMode");
     const payload = this.protocol.createChargeModePayload(mode);
     await this.sendCommand(COMMAND_TYPES.SET_CHARGE_MODE, payload);
   }
@@ -804,6 +978,7 @@ class BLEDeviceManager {
    * @param mask Bitmask of `OUTPUT_CHANNEL` values (0-3)
    */
   public async setOutputChannels(mask: number): Promise<void> {
+    this.requireB2500("setOutputChannels");
     const payload = this.protocol.createOutputChannelsPayload(mask);
     await this.sendCommand(COMMAND_TYPES.SET_OUTPUT_CHANNELS, payload);
   }
@@ -813,9 +988,15 @@ class BLEDeviceManager {
    * @param enabled Whether adaptive mode should be on
    */
   public async setAdaptiveMode(enabled: boolean): Promise<void> {
-    await this.sendCommand(COMMAND_TYPES.SET_ADAPTIVE_MODE, [
-      enabled ? 0x01 : 0x00,
-    ]);
+    this.requireB2500("setAdaptiveMode");
+    if (!enabled) {
+      // The device switches to adaptive mode whatever the payload says; it
+      // leaves adaptive mode when timers are written.
+      throw new Error(
+        "Adaptive mode cannot be switched off directly: write the timers (setTimers) to return to timer mode.",
+      );
+    }
+    await this.sendCommand(COMMAND_TYPES.SET_ADAPTIVE_MODE, [0x01]);
   }
 
   /**
@@ -827,6 +1008,7 @@ class BLEDeviceManager {
    * @param date Date to write; defaults to now
    */
   public async setDateTime(date?: Date): Promise<void> {
+    this.requireB2500("setDateTime");
     const payload = this.protocol.createDateTimePayload(date);
     await this.sendCommand(COMMAND_TYPES.SET_DATETIME, payload);
   }
@@ -840,6 +1022,13 @@ class BLEDeviceManager {
     // sendCommand repeats every frame by default. The device can drop the BLE
     // link as soon as it acts on the first restart frame, which would make the
     // second write fail and report a successful restart as an error.
+    if (this.family && this.family !== "b2500") {
+      // the Venus E Mini restarts over Bluetooth; the other families don't
+      await this.sendFamilyCommand(createRestartCommand(this.family), {
+        sendTwice: false,
+      });
+      return;
+    }
     await this.sendCommand(COMMAND_TYPES.RESTART_DEVICE, [0x01], {
       sendTwice: false,
     });
@@ -853,6 +1042,7 @@ class BLEDeviceManager {
   public async runDiagnosis(
     variant: number = DIAGNOSIS_VARIANT.CURRENT,
   ): Promise<void> {
+    this.requireB2500("runDiagnosis");
     if (
       variant !== DIAGNOSIS_VARIANT.LEGACY &&
       variant !== DIAGNOSIS_VARIANT.CURRENT
@@ -870,6 +1060,7 @@ class BLEDeviceManager {
    * @returns Command response
    */
   public async setMqttConfig(config: MQTTConfig): Promise<void> {
+    this.requireB2500("setMqttConfig");
     if (!config.host || !config.port) {
       throw new Error("Host and port are required");
     }
@@ -885,7 +1076,617 @@ class BLEDeviceManager {
    * @returns Command response
    */
   public async resetMqttConfig(): Promise<void> {
+    this.requireB2500("resetMqttConfig");
     await this.sendCommand(COMMAND_TYPES.RESET_MQTT, null);
+  }
+
+  // ====== Device families ======
+
+  /**
+   * Remember the device's family; ignores `undefined` so a name that gives
+   * nothing away does not erase what the device info established.
+   */
+  private setFamily(family: DeviceFamily | undefined): void {
+    if (family && family !== this.family) {
+      this.family = family;
+      this.log(`Device family: ${family}`);
+      this._triggerEvent("familyDetected", family);
+    }
+  }
+
+  /** The device type from its device info: family, and a meter's variant. */
+  private noteDeviceType(type: string | undefined): void {
+    this.setFamily(detectDeviceFamily({ type }));
+    this.meterVariant ??= detectMeterVariant({ type });
+  }
+
+  /**
+   * CT002 or CT003, for a connected meter: from its Bluetooth name
+   * (`MST-TPM_`, `MST-SMR_`) or its device type (`HME-4`, `HME-3`).
+   */
+  public getMeterVariant(): MeterVariant | undefined {
+    return this.family === "meter" ? this.meterVariant : undefined;
+  }
+
+  private requireMeter(variant: MeterVariant, method: string): void {
+    if (this.family !== "meter") {
+      throw new Error(`${method}() is only supported on the meters`);
+    }
+    if (this.meterVariant !== variant) {
+      throw new Error(
+        `${method}() is only supported on the ${variant.toUpperCase()}` +
+          (this.meterVariant
+            ? ` (this is a ${this.meterVariant.toUpperCase()})`
+            : " (which meter this is is not known)"),
+      );
+    }
+  }
+
+  /**
+   * Send `command` and wait for the first notification `accept` turns into
+   * a result (undefined: not the reply). Rejected on timeout, a send error,
+   * a throwing `accept` or the connection ending.
+   */
+  private awaitReply<T>(
+    command: number,
+    payload: Uint8Array | number[] | null,
+    accept: (frame: Uint8Array) => T | undefined,
+    timeout: number,
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const done = () => {
+        this.frameListeners.delete(onFrame);
+        this.pendingReads.delete(cancel);
+        clearTimeout(timeoutId);
+      };
+      const cancel = (error: unknown) => {
+        done();
+        reject(error);
+      };
+      const onFrame = (frame: Uint8Array) => {
+        let result: T | undefined;
+        try {
+          result = accept(frame);
+        } catch (error) {
+          cancel(error);
+          return;
+        }
+        if (result === undefined) return;
+        done();
+        resolve(result);
+      };
+      const timeoutId = setTimeout(
+        () => cancel(new Error("Command timed out")),
+        timeout,
+      );
+      this.frameListeners.add(onFrame);
+      this.pendingReads.add(cancel);
+      this.sendCommand(command, payload).catch(cancel);
+    });
+  }
+
+  /**
+   * Family of the connected device, from its Bluetooth name or, once known,
+   * its device type. `undefined` for unknown devices, which are treated as a
+   * B2500.
+   */
+  public getFamily(): DeviceFamily | undefined {
+    return this.family;
+  }
+
+  /**
+   * Ask the device for its type and return its family.
+   *
+   * The Bluetooth name usually tells already; this confirms it from the
+   * device type, which is the reliable source.
+   */
+  public async detectFamily(options?: {
+    timeout?: number;
+  }): Promise<DeviceFamily | undefined> {
+    const info = await this.getDeviceInfo(options);
+    this.noteDeviceType(info.type);
+    return this.family;
+  }
+
+  /**
+   * Refuse a B2500 command on another family.
+   *
+   * The other families give the B2500's command numbers different meanings
+   * (on a Venus C/E, `0x25` sets the Shelly port rather than restarting), so
+   * sending them blind would change unrelated settings.
+   */
+  private requireB2500(method: string): void {
+    if (this.family && this.family !== "b2500") {
+      throw new Error(
+        `${method}() is a B2500 command and is not supported on this device (${this.family}).`,
+      );
+    }
+  }
+
+  private requireFamily(
+    command: keyof typeof MARSTEK_COMMANDS,
+    method: string,
+  ): DeviceFamily {
+    if (!familySupports(this.family, command)) {
+      throw new Error(
+        `${method}() is not supported on this device (${this.family ?? "unknown family"}).`,
+      );
+    }
+    return this.family!;
+  }
+
+  /**
+   * Send a command and wait for the reply with the same command number,
+   * decoded with the device family's layout.
+   *
+   * @param command Command number
+   * @param payload Payload bytes
+   * @param options `timeout` in ms (default 5000)
+   */
+  public async request(
+    command: number,
+    payload: Uint8Array | number[] | null = null,
+    options?: { timeout?: number },
+  ): Promise<FamilyMessage> {
+    const { timeout = 5000 } = options ?? {};
+    const family = this.family;
+    if (!family || family === "b2500") {
+      throw new Error("request() is for devices other than the B2500");
+    }
+    return this.awaitReply(
+      command,
+      payload,
+      (frame) =>
+        frame.length >= 5 && frame[0] === 0x73 && frame[3] === command
+          ? (decodeFamilyMessage(family, frame) ?? undefined)
+          : undefined,
+      timeout,
+    );
+  }
+
+  private async requestKind<K extends keyof FamilyData>(
+    command: number,
+    kind: K,
+    payload: number[] | null = null,
+  ): Promise<FamilyData[K]> {
+    const msg = await this.request(command, payload);
+    if (msg.kind !== kind) {
+      throw new Error(
+        `Unexpected reply to 0x${command.toString(16)}: ${msg.kind}`,
+      );
+    }
+    return msg.data as unknown as FamilyData[K];
+  }
+
+  /**
+   * Status of a Venus, Venus E Mini or Jupiter (`0x03`).
+   *
+   * For a B2500 use {@link getRuntimeInfo}.
+   */
+  public async getStatus(): Promise<
+    | Venus3RuntimeInfo
+    | VenusRuntimeInfo
+    | VenusMiniRuntimeInfo
+    | JupiterRuntimeInfo
+    | MeterStatus
+  > {
+    this.requireFamily("RUNTIME_INFO", "getStatus");
+    if (this.family === "meter") {
+      return this.requestKind(MARSTEK_COMMANDS.RUNTIME_INFO, "meterStatus", [
+        0x01,
+      ]);
+    }
+    return this.requestKind(MARSTEK_COMMANDS.RUNTIME_INFO, "runtimeInfo");
+  }
+
+  /**
+   * Battery data with cell voltages (`0x14`): every Venus model and the
+   * Jupiter.
+   */
+  public async getBatteryInfo(): Promise<BatteryInfo> {
+    const family = this.requireFamily("BATTERY_INFO", "getBatteryInfo");
+    if (family === "jupiter") {
+      return (await this.getSystemInfo()).battery;
+    }
+    return this.requestKind(MARSTEK_COMMANDS.BATTERY_INFO, "batteryInfo");
+  }
+
+  /** Grid, PV and battery measurements of a Jupiter (`0x14`). */
+  public async getSystemInfo(): Promise<JupiterSystemInfo> {
+    if (this.family !== "jupiter") {
+      throw new Error("getSystemInfo() is only supported on the Jupiter");
+    }
+    return this.requestKind(MARSTEK_COMMANDS.BATTERY_INFO, "systemInfo");
+  }
+
+  /** Grid frequency, voltage and AC power of a Venus E 3.0/A/D (`0x0D`). */
+  public async getInverterInfo(): Promise<Venus3InverterInfo> {
+    this.requireFamily("INVERTER_INFO", "getInverterInfo");
+    return this.requestKind(MARSTEK_COMMANDS.INVERTER_INFO, "inverterInfo");
+  }
+
+  /** The device clock: Venus E 3.0/A/D and Jupiter (`0x0B`). */
+  public async getDeviceTime(): Promise<DeviceDateTime> {
+    this.requireFamily("GET_DATETIME", "getDeviceTime");
+    return this.requestKind(MARSTEK_COMMANDS.GET_DATETIME, "dateTime");
+  }
+
+  /** The Wi-Fi network the device is configured for: Venus, CT002/CT003 (`0x08`). */
+  public async getWifiSsid(): Promise<string> {
+    this.requireFamily("GET_WIFI_SSID", "getWifiSsid");
+    return this.requestKind(
+      MARSTEK_COMMANDS.GET_WIFI_SSID,
+      "wifiSsid",
+      this.family === "meter" ? [0x01] : null,
+    );
+  }
+
+  /** IP address, gateway, netmask and DNS: every Venus, the Mini and the Jupiter. */
+  public async getNetworkInfo(): Promise<NetworkInfo> {
+    if (!this.family || this.family === "b2500") {
+      return this.requestB2500(
+        COMMAND_TYPES.GET_NETWORK_INFO,
+        [0x01],
+        (frame) => this.protocol.parseNetworkInfo(frame),
+      );
+    }
+    this.requireFamily("GET_NETWORK_INFO", "getNetworkInfo");
+    const c = createNetworkInfoCommand(this.family);
+    return this.requestKind(c.command, "networkInfo", Array.from(c.payload));
+  }
+
+  /**
+   * Set the depth of discharge on any family that supports it: the B2500
+   * (0-100 %), the Venus E 3.0/A/D (30-88 %), the Venus E Mini and the
+   * Jupiter (30-90 %).
+   *
+   * This is persisted to the device's flash, so do not call it on a timer or
+   * in a control loop.
+   */
+  public async setDepthOfDischarge(percent: number): Promise<void> {
+    if (!this.family || this.family === "b2500") {
+      return this.setDod(percent);
+    }
+    await this.sendFamilyCommand(
+      createDepthOfDischargeCommand(this.family, percent),
+    );
+  }
+
+  /** Turn the status LED on or off (Venus E 3.0/A/D, Venus E Mini). */
+  public async setStatusLed(on: boolean): Promise<void> {
+    await this.sendFamilyCommand(createStatusLedCommand(this.family, on));
+  }
+
+  /**
+   * Send a B2500 command and decode the reply with the same command number.
+   * Some B2500 replies have no checksum or a wrong length byte, so the
+   * reply is taken as it arrives.
+   */
+  private requestB2500<T>(
+    command: number,
+    payload: number[],
+    parse: (frame: Uint8Array) => T,
+    timeout = 5000,
+  ): Promise<T> {
+    if (this.family && this.family !== "b2500") {
+      return Promise.reject(
+        new Error(
+          `0x${command.toString(16)} is a B2500 command and is not supported on this device (${this.family}).`,
+        ),
+      );
+    }
+    return this.awaitReply(
+      command,
+      payload,
+      (frame) =>
+        frame.length >= 4 && frame[0] === 0x73 && frame[3] === command
+          ? parse(frame)
+          : undefined,
+      timeout,
+    );
+  }
+
+  /** B2500: Wi-Fi signal in dBm and the SSID (`0x09`). */
+  public async getWifiSignal(): Promise<{ rssi: number; ssid: string }> {
+    return this.requestB2500(COMMAND_TYPES.GET_WIFI_SIGNAL, [0x01], (f) =>
+      this.protocol.parseWifiSignal(f),
+    );
+  }
+
+  /** B2500: the Wi-Fi module's firmware version (`0x23`). */
+  public async getWifiModuleVersion(): Promise<string> {
+    return this.requestB2500(
+      COMMAND_TYPES.GET_WIFI_MODULE_VERSION,
+      [0x01],
+      (f) => this.protocol.parseWifiModuleVersion(f),
+    );
+  }
+
+  /** B2500: rated output and input power in W (`0x2D`). */
+  public async getRatedPower(): Promise<{
+    outputPower: number;
+    inputPower: number;
+  }> {
+    return this.requestB2500(COMMAND_TYPES.GET_RATED_POWER, [0x01], (f) =>
+      this.protocol.parseRatedPower(f),
+    );
+  }
+
+  /**
+   * B2500: voltage, current and temperatures of the host pack and each
+   * extension pack (`0x2E`; B2500 v2 and v3).
+   */
+  public async getBatteryPacks(): Promise<
+    ReturnType<HMDeviceProtocol["parseBatteryPacks"]>
+  > {
+    return this.requestB2500(COMMAND_TYPES.GET_BATTERY_PACKS, [0x01], (f) =>
+      this.protocol.parseBatteryPacks(f),
+    );
+  }
+
+  /** B2500: CT status with the phase powers (`0x33`). */
+  public async getCtStatus(): Promise<
+    ReturnType<HMDeviceProtocol["parseCtStatus"]>
+  > {
+    return this.requestB2500(COMMAND_TYPES.GET_CT_STATUS, [0x01], (f) =>
+      this.protocol.parseCtStatus(f),
+    );
+  }
+
+  /**
+   * B2500: cloud region (`B2500_REGION`). This moves the device to another
+   * cloud host.
+   */
+  public async setRegion(region: number): Promise<void> {
+    this.requireB2500("setRegion");
+    if (![0, 1, 2].includes(region)) {
+      throw new Error("Region must be B2500_REGION.EU, CHINA or OTHER");
+    }
+    await this.sendCommand(COMMAND_TYPES.SET_REGION, [region]);
+  }
+
+  /**
+   * B2500: the smart meter it reads (`B2500_METER_TYPE`) and the meter's
+   * MAC. Setting a meter restarts the CT search.
+   */
+  public async setMeterType(meterType: number, mac?: string): Promise<void> {
+    this.requireB2500("setMeterType");
+    await this.sendCommand(
+      COMMAND_TYPES.SET_METER_TYPE,
+      this.protocol.createMeterTypePayload(meterType, mac),
+    );
+  }
+
+  /**
+   * Factory reset (B2500 `0x26`, CT002/CT003 `0x06`). The device forgets
+   * its Wi-Fi and settings and has to be set up again.
+   */
+  public async factoryReset(): Promise<void> {
+    if (this.family === "meter") {
+      await this.sendCommand(0x06, [0x01], { sendTwice: false });
+      return;
+    }
+    this.requireB2500("factoryReset");
+    await this.sendCommand(COMMAND_TYPES.FACTORY_RESET, [0x01], {
+      sendTwice: false,
+    });
+  }
+
+  /** CT002: voltage, voltage phase angles and active power per phase. */
+  public async getMeterPhaseReadings(): Promise<MeterPhaseReadings> {
+    this.requireMeter("ct002", "getMeterPhaseReadings");
+    const out: MeterPhaseReadings = {};
+    for (const c of [0x13, 0x15, 0x16]) {
+      const msg = await this.request(c, [0x01]);
+      if (msg.kind === "meterPhases") Object.assign(out, msg.data);
+    }
+    return out;
+  }
+
+  /**
+   * CT002: measurement direction mask, bit 0-2 = phase A-C (see
+   * `createMeterDirectionCommand` for the polarity).
+   */
+  public async setMeterDirection(mask: number): Promise<void> {
+    this.requireMeter("ct002", "setMeterDirection");
+    await this.sendFamilyCommand(createMeterDirectionCommand(mask));
+  }
+
+  /** CT003: reader settings. The meter restarts after accepting them. */
+  public async setMeterReader(
+    reader: Parameters<typeof createMeterReaderCommand>[0],
+  ): Promise<void> {
+    this.requireMeter("ct003", "setMeterReader");
+    await this.sendFamilyCommand(createMeterReaderCommand(reader), {
+      sendTwice: false,
+    });
+  }
+
+  /** CT002: zero-point calibration. */
+  public async calibrateMeterZero(): Promise<void> {
+    this.requireMeter("ct002", "calibrateMeterZero");
+    await this.sendFamilyCommand(createMeterZeroCalibrationCommand(), {
+      sendTwice: false,
+    });
+  }
+
+  private async sendFamilyCommand(
+    c: FamilyCommand,
+    options?: CommandOptions,
+  ): Promise<void> {
+    await this.sendCommand(c.command, c.payload, options);
+  }
+
+  /**
+   * Set the working mode: `auto` follows the meter, `manual` runs the time
+   * periods, `ai` the cloud's plan, `ups` (Venus E Mini) charges from the
+   * grid. The Jupiter takes `auto` and `manual`.
+   */
+  public async setWorkingMode(mode: WorkingMode): Promise<void> {
+    await this.sendFamilyCommand(createWorkingModeCommand(this.family, mode));
+  }
+
+  /** Read the time periods of a Venus or Jupiter (10 and 5 slots). */
+  public async getTimePeriods(): Promise<TimePeriod[]> {
+    const c = createReadTimePeriodsCommand(this.family);
+    return this.requestKind(c.command, "timePeriods", Array.from(c.payload));
+  }
+
+  /**
+   * Write one time period of a Venus or Jupiter. The slots are stored one
+   * at a time; on a Jupiter this also switches to manual mode.
+   * @param index 0-based slot
+   */
+  public async setTimePeriod(index: number, period: TimePeriod): Promise<void> {
+    await this.sendFamilyCommand(
+      createTimePeriodCommand(this.family, index, period),
+    );
+  }
+
+  /** Read the Venus E Mini's working mode and six schedule slots. */
+  public async getMiniSchedule(): Promise<{
+    workingMode?: WorkingMode;
+    slots: MiniScheduleSlot[];
+  }> {
+    if (this.family !== "venusMini") {
+      throw new Error(
+        "getMiniSchedule() is only supported on the Venus E Mini",
+      );
+    }
+    const c = createReadMiniScheduleCommand();
+    return this.requestKind(c.command, "miniSchedule", Array.from(c.payload));
+  }
+
+  /**
+   * Write one of the Venus E Mini's schedule slots.
+   * @param index 0-based slot, 0-5
+   */
+  public async setMiniScheduleSlot(
+    index: number,
+    slot: MiniScheduleSlot,
+  ): Promise<void> {
+    if (this.family !== "venusMini") {
+      throw new Error(
+        "setMiniScheduleSlot() is only supported on the Venus E Mini",
+      );
+    }
+    await this.sendFamilyCommand(createMiniScheduleSlotCommand(index, slot));
+  }
+
+  /**
+   * Bluetooth advertising on or off. Off is the app's "Bluetooth lock": the
+   * device stops advertising and this connection ends.
+   */
+  public async setBluetooth(on: boolean): Promise<void> {
+    await this.sendFamilyCommand(createBluetoothCommand(this.family, on), {
+      sendTwice: on,
+    });
+  }
+
+  /** Surplus feed-in on or off (B2500 v2/v3, Venus, Jupiter). */
+  public async setSurplusFeedIn(on: boolean): Promise<void> {
+    if (!this.family || this.family === "b2500") {
+      // B2500 (firmware 226, HMJ 108 or later): the payload is "disabled"
+      await this.sendCommand(COMMAND_TYPES.SET_SURPLUS_FEED_IN, [on ? 0 : 1]);
+      return;
+    }
+    await this.sendFamilyCommand(createSurplusFeedInCommand(this.family, on));
+  }
+
+  /**
+   * Enable or disable the local API (Marstek Open API) and set its UDP
+   * port; the Venus E Mini also takes the remote port.
+   */
+  public async setLocalApi(
+    enabled: boolean,
+    port: number,
+    remotePort?: number,
+  ): Promise<void> {
+    await this.sendFamilyCommand(
+      createLocalApiCommand(this.family, enabled, port, remotePort),
+    );
+  }
+
+  /** Maximum charging power in W (Venus E 3.0/A/D). */
+  public async setMaxChargePower(watts: number): Promise<void> {
+    await this.sendFamilyCommand(
+      createMaxChargePowerCommand(this.family, watts),
+    );
+  }
+
+  /** Maximum discharging power in W (Venus E 3.0/A/D). */
+  public async setMaxDischargePower(watts: number): Promise<void> {
+    await this.sendFamilyCommand(
+      createMaxDischargePowerCommand(this.family, watts),
+    );
+  }
+
+  /** Peak shaving at `watts`, or off with `null` (Venus E 3.0/A/D). */
+  public async setPeakShaving(watts: number | null): Promise<void> {
+    await this.sendFamilyCommand(createPeakShavingCommand(this.family, watts));
+  }
+
+  /** Backup (EPS) output on or off (Venus). */
+  public async setBackup(on: boolean): Promise<void> {
+    await this.sendFamilyCommand(createBackupCommand(this.family, on));
+  }
+
+  /** IP address of a network meter (P1 meter, EcoTracker). */
+  public async setMeterIp(ip: string): Promise<void> {
+    await this.sendFamilyCommand(createMeterIpCommand(this.family, ip));
+  }
+
+  /** Start the meter phase detection. */
+  public async startPhaseDetection(): Promise<void> {
+    await this.sendFamilyCommand(createPhaseDetectionCommand(this.family), {
+      sendTwice: false,
+    });
+  }
+
+  /** Set the device clock to `date` (default: now, local time). */
+  public async setClock(date?: Date): Promise<void> {
+    await this.sendFamilyCommand(createClockCommand(this.family, date));
+  }
+
+  /**
+   * Cloud server region (see `createCloudServerCommand` for the codes). A
+   * wrong value disconnects the device from the Marstek cloud.
+   */
+  public async setCloudServer(server: number): Promise<void> {
+    await this.sendFamilyCommand(createCloudServerCommand(this.family, server));
+  }
+
+  /**
+   * The Venus E Mini's power limits: the higher feed-in limit, and grid
+   * charging limited to 800 W.
+   */
+  public async setPowerLimits(
+    highFeedIn: boolean,
+    lowGridCharge: boolean,
+  ): Promise<void> {
+    await this.sendFamilyCommand(
+      createPowerLimitsCommand(this.family, highFeedIn, lowGridCharge),
+    );
+  }
+
+  /** The Venus E Mini's UPS charge power in W. */
+  public async setUpsChargePower(watts: number): Promise<void> {
+    await this.sendFamilyCommand(
+      createUpsChargePowerCommand(this.family, watts),
+    );
+  }
+
+  /** The Venus E Mini's anti-reverse (zero feed-in) setting. */
+  public async setAntiReverse(enabled: boolean, watts: number): Promise<void> {
+    await this.sendFamilyCommand(
+      createAntiReverseCommand(this.family, enabled, watts),
+    );
+  }
+
+  /** Meter power per phase as the Venus E Mini sees it. */
+  public async getMeterPower(): Promise<MeterPower> {
+    const c = createMeterPowerCommand(this.family);
+    return this.requestKind(c.command, "meterPower", Array.from(c.payload));
   }
 
   /**
@@ -928,6 +1729,10 @@ class BLEDeviceManager {
   public async sendRawBytes(bytes: Uint8Array): Promise<void> {
     if (!this.connected || !this.commandCharacteristic) {
       throw new Error("Not connected to device");
+    }
+
+    if (bytes.length > 3) {
+      assertCommandAllowed(this.family, bytes[3]);
     }
 
     try {

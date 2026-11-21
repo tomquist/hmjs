@@ -20,6 +20,9 @@ interface ConnectionPanelProps {
   onAutoReconnectChange: (checked: boolean) => void;
   onAllowAnyDeviceChange: (checked: boolean) => void;
   onDeviceTypeChange: (type: DeviceType) => void;
+  /** WebSocket URL of a device emulated by marsemu; empty = Web Bluetooth */
+  emulatorUrl: string;
+  onEmulatorUrlChange: (url: string) => void;
 }
 
 const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
@@ -35,8 +38,10 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   onAutoReconnectChange,
   onAllowAnyDeviceChange,
   onDeviceTypeChange,
+  emulatorUrl,
+  onEmulatorUrlChange,
 }) => {
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(Boolean(emulatorUrl));
 
   return (
     <div className="connection-panel">
@@ -90,6 +95,31 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               />
               Connect to any Bluetooth device
             </label>
+            <div className="emulator-url">
+              <label htmlFor="emulator-url-input">
+                Emulator (marsemu) WebSocket URL:
+              </label>
+              <input
+                id="emulator-url-input"
+                type="text"
+                placeholder="ws://localhost:7101/"
+                value={emulatorUrl}
+                disabled={isConnected}
+                onChange={(e) => onEmulatorUrlChange(e.target.value)}
+              />
+              <p className="device-type-hint">
+                Connects to a device emulated by{" "}
+                <a
+                  href="https://github.com/tomquist/marsemu"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  marsemu
+                </a>{" "}
+                (<code>--ble-ws 7101</code>, or its dashboard&apos;s &quot;Open
+                in hmjs&quot;) instead of a Bluetooth device.
+              </p>
+            </div>
             <div className="device-type-selector">
               <label htmlFor="device-type-select">Device type:</label>
               <select

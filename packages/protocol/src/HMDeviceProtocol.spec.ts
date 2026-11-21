@@ -490,12 +490,23 @@ describe("HMDeviceProtocol", () => {
   });
 
   describe("createDateTimePayload", () => {
-    // The device uses the struct tm convention: year - 1900, month 0-based.
-    it("should encode the six date fields plus two trailing zeros", () => {
-      const date = new Date(2024, 11, 15, 14, 30, 45); // 15 Dec 2024, local
-      expect(Array.from(protocol.createDateTimePayload(date))).toEqual([
-        124, 11, 15, 14, 30, 45, 0, 0,
+    // The device keeps UTC (struct tm: year - 1900, month 0-based) and
+    // applies the trailing offset to local time itself, as the app sends it.
+    it("should encode the UTC date and the offset in minutes", () => {
+      const date = new Date(Date.UTC(2024, 11, 15, 13, 30, 45));
+      expect(Array.from(protocol.createDateTimePayload(date, 60))).toEqual([
+        124, 11, 15, 13, 30, 45, 60, 0,
       ]);
+      expect(Array.from(protocol.createDateTimePayload(date, -300))).toEqual([
+        124, 11, 15, 13, 30, 45, 0xd4, 0xfe,
+      ]);
+    });
+
+    it("should default to this machine's offset", () => {
+      const date = new Date(Date.UTC(2024, 5, 1, 12, 0, 0));
+      const payload = protocol.createDateTimePayload(date);
+      const offset = ((payload[6] | (payload[7] << 8)) << 16) >> 16;
+      expect(offset).toBe(-date.getTimezoneOffset() || 0);
     });
 
     it("should produce the 8 payload bytes the device expects", () => {
@@ -545,7 +556,8 @@ describe("HMDeviceProtocol", () => {
 
     it("should match the app's date/time frame shape", () => {
       const payload = protocol.createDateTimePayload(
-        new Date(2024, 11, 15, 14, 30, 45),
+        new Date(Date.UTC(2024, 11, 15, 14, 30, 45)),
+        0,
       );
       const frame = protocol.createCommandMessage(
         COMMANDS.SET_DATETIME,
@@ -652,6 +664,113 @@ describe("HMDeviceProtocol", () => {
       expect(() => protocol.createTimerConfigPayload(invalid)).toThrow(
         "start hour must be 0-23",
       );
+    });
+  });
+
+  describe("B2500 replies recorded from the firmware", () => {
+    const bytes = (h: string) =>
+      new Uint8Array(
+        h
+          .replace(/ /g, "")
+          .match(/../g)!
+          .map((b) => parseInt(b, 16)),
+      );
+    const withPayload = (cmd: number, payload: Uint8Array) => {
+      const f = new Uint8Array(payload.length + 5);
+      f.set([0x73, f.length, 0x23, cmd]);
+      f.set(payload, 4);
+      f[f.length - 1] = protocol.calculateChecksum(f.subarray(0, -1));
+      return f;
+    };
+
+    it("decodes the Wi-Fi signal and SSID (no checksum)", () => {
+      expect(
+        protocol.parseWifiSignal(bytes("730c2309d0ff456d754e6574")),
+      ).toEqual({ rssi: -48, ssid: "EmuNet" });
+    });
+
+    it("decodes the Wi-Fi module version", () => {
+      const f = withPayload(
+        0x23,
+        new Uint8Array([...new TextEncoder().encode("202409090159"), 0]),
+      );
+      expect(protocol.parseWifiModuleVersion(f)).toBe("202409090159");
+    });
+
+    it("decodes the CT status (no checksum)", () => {
+      expect(
+        protocol.parseCtStatus(
+          bytes("73122333 03 01 01 03 4cff 7800 3c00 0000 2a02"),
+        ),
+      ).toEqual({
+        searchState: 3,
+        connectionState: 1,
+        phase: 1,
+        meterType: 3,
+        phasePowers: [-180, 120, 60],
+        gridPower: 0,
+        outputPower: 554,
+      });
+    });
+
+    it("decodes the host and extension packs", () => {
+      const f = withPayload(
+        0x2e,
+        bytes(
+          "b0b40000 af140000 1900 1900 b4b40000 4c140000 1900 1900" +
+            "000000000000000000000000 640000",
+        ),
+      );
+      expect(protocol.parseBatteryPacks(f)).toEqual([
+        { index: 0, voltage: 46.256, current: 5.295, temperatures: [25, 25] },
+        { index: 1, voltage: 46.26, current: 5.196, temperatures: [25, 25] },
+      ]);
+    });
+
+    it("decodes the rated power and the network info", () => {
+      expect(
+        protocol.parseRatedPower(withPayload(0x2d, bytes("3c07 3905 0000"))),
+      ).toEqual({ outputPower: 1852, inputPower: 1337 });
+      const text =
+        "192.168.1.50<.,.>192.168.1.1<.,.>255.255.255.0<.,.>192.168.1.1";
+      expect(
+        protocol.parseNetworkInfo(
+          withPayload(0x38, new TextEncoder().encode(text)),
+        ),
+      ).toEqual({
+        ip: "192.168.1.50",
+        gateway: "192.168.1.1",
+        netmask: "255.255.255.0",
+        dns: "192.168.1.1",
+      });
+    });
+
+    it("decodes the CT details of the five-slot timer reply", () => {
+      const payload = new Uint8Array(54);
+      payload.set(bytes("00 0c02 0100 0000"), 22);
+      payload.set(bytes("ff 07 0000 6500 38ff 6400"), 29);
+      payload[53] = 1;
+      const info = protocol.parseTimerInfo(
+        new DataView(withPayload(0x13, payload).buffer),
+      );
+      expect(info.ct).toEqual({
+        phase: 255,
+        status: 7,
+        phasePowers: [101, -200, 100],
+        meterType: 1,
+      });
+      expect(info.smartMeter).toMatchObject({ powerOut: 524, meterReading: 1 });
+    });
+
+    it("encodes the meter type with the MAC as text", () => {
+      expect(
+        Array.from(protocol.createMeterTypePayload(3, "11:22:33:44:55:66")),
+      ).toEqual([3, ...new TextEncoder().encode("112233445566")]);
+      expect(Array.from(protocol.createMeterTypePayload(0))).toEqual([
+        0,
+        ...new TextEncoder().encode("000000000000"),
+      ]);
+      expect(() => protocol.createMeterTypePayload(3, "zz")).toThrow();
     });
   });
 });

@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { BLEDeviceManager, DeviceType } from "@tomquist/hmjs-ble";
+import {
+  BLEDeviceManager,
+  DeviceType,
+  createEmulatorBluetooth,
+} from "@tomquist/hmjs-ble";
 import {
   DeviceInfo,
   RuntimeInfo,
@@ -11,6 +15,8 @@ import {
   WIFI_ILLEGAL_CHARACTERS,
   WIFI_PASSWORD_MIN_LENGTH,
   CHARGE_MODE,
+  DEVICE_FAMILIES,
+  DeviceFamily,
 } from "@tomquist/hmjs-protocol";
 import {
   DisclaimerModal,
@@ -23,6 +29,7 @@ import {
   ConfigurationTab,
   DeviceControlTab,
   AdvancedTab,
+  FamilyStatusTab,
 } from "./components";
 import { isIOS, isBluetoothSupported } from "./utils/platform.js";
 
@@ -34,8 +41,17 @@ enum TabType {
   Timers = "timers-tab",
   Configuration = "config-tab",
   DeviceControl = "device-control-tab",
+  FamilyStatus = "family-status-tab",
   Advanced = "advanced-tab",
 }
+
+/** Tabs that only make sense on a B2500 */
+const B2500_TABS = new Set<TabType>([
+  TabType.Runtime,
+  TabType.CellInfo,
+  TabType.Timers,
+  TabType.DeviceControl,
+]);
 
 // Found device interface
 interface FoundDevice {
@@ -48,9 +64,28 @@ const App: React.FC = () => {
   // Disclaimer state
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
 
-  // Web Bluetooth unsupported state
+  // An emulated device in marsemu (?emulator=ws://localhost:7101/) instead
+  // of Web Bluetooth
+  const [emulatorUrl, setEmulatorUrl] = useState(
+    () => new URLSearchParams(window.location.search).get("emulator") ?? "",
+  );
+  const emulatorRef = useRef<{ url: string; bluetooth: Bluetooth } | null>(
+    null,
+  );
+  const emulatorBluetooth = (): Bluetooth | undefined => {
+    const url = emulatorUrl.trim();
+    if (!url) return undefined;
+    if (emulatorRef.current?.url !== url) {
+      emulatorRef.current = { url, bluetooth: createEmulatorBluetooth(url) };
+    }
+    return emulatorRef.current.bluetooth;
+  };
+
+  // Web Bluetooth unsupported state (irrelevant when talking to an emulator)
   const [bluetoothUnsupported, setBluetoothUnsupported] = useState(
-    () => !isBluetoothSupported(),
+    () =>
+      !isBluetoothSupported() &&
+      !new URLSearchParams(window.location.search).get("emulator"),
   );
 
   // State variables
@@ -58,6 +93,9 @@ const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("Disconnected");
+  // Family of the connected device; undefined until known (treated as B2500)
+  const [family, setFamily] = useState<DeviceFamily | undefined>(undefined);
+  const isB2500 = family === undefined || family === "b2500";
   const [autoReconnect, setAutoReconnect] = useState(true);
   const [selectedDevice, setSelectedDevice] = useState<FoundDevice | null>(
     null,
@@ -158,7 +196,6 @@ const App: React.FC = () => {
     deviceManagerRef.current = new BLEDeviceManager({
       autoReconnect: true,
       reconnectDelay: 2000,
-      deviceNamePrefix: "HM_",
       logger: logFunction,
     });
 
@@ -202,8 +239,18 @@ const App: React.FC = () => {
       }, 1000);
     });
 
+    deviceManager.on("familyDetected", (detected: DeviceFamily) => {
+      setFamily(detected);
+      if (detected !== "b2500") {
+        setActiveTab((tab) =>
+          B2500_TABS.has(tab) ? TabType.FamilyStatus : tab,
+        );
+      }
+    });
+
     deviceManager.on("disconnect", () => {
       setIsConnected(false);
+      setFamily(undefined);
       setConnectionStatus("Disconnected");
 
       // Clear all device data when device disconnects
@@ -219,6 +266,8 @@ const App: React.FC = () => {
 
     deviceManager.on("reconnect", (device: BluetoothDevice) => {
       setIsConnected(true);
+      // the same device: its family, which the disconnect cleared
+      setFamily(deviceManager.getFamily());
       setConnectionStatus(`Reconnected to ${device.name || "device"}`);
 
       setSelectedDevice({
@@ -268,7 +317,10 @@ const App: React.FC = () => {
     });
 
     // Check if Web Bluetooth API is supported
-    if (!isBluetoothSupported()) {
+    if (
+      !isBluetoothSupported() &&
+      !new URLSearchParams(window.location.search).get("emulator")
+    ) {
       logFunction("Web Bluetooth API is not supported in this browser");
       setBluetoothUnsupported(true);
       setConnectionStatus("Bluetooth not supported in this browser");
@@ -340,6 +392,7 @@ const App: React.FC = () => {
           // Use the BLE package's scanForDevices method
           const device = await deviceManagerRef.current.scanForDevices({
             acceptAllDevices: allowAnyDevice,
+            bluetooth: emulatorBluetooth(),
           });
 
           // Only proceed if we have a valid device. Whitelabeled devices may
@@ -846,7 +899,7 @@ const App: React.FC = () => {
     runDeviceCommand(
       "set charge mode",
       (dm) => dm.setChargeMode(mode),
-      `Charge mode set to ${mode === CHARGE_MODE.FULL ? "full" : "half"}`,
+      `Charging mode set to ${mode === CHARGE_MODE.FULL ? "fully charge, then discharge" : "charge and discharge together"}`,
     );
 
   const setOutputChannels = async (mask: number) =>
@@ -1049,7 +1102,15 @@ const App: React.FC = () => {
   };
 
   if (bluetoothUnsupported) {
-    return <BluetoothUnsupportedModal isIOS={isIOS()} />;
+    return (
+      <BluetoothUnsupportedModal
+        isIOS={isIOS()}
+        onUseEmulator={(url) => {
+          setEmulatorUrl(url);
+          setBluetoothUnsupported(false);
+        }}
+      />
+    );
   }
 
   if (!disclaimerAccepted) {
@@ -1059,8 +1120,11 @@ const App: React.FC = () => {
   return (
     <div className="container">
       <header>
-        <h1>B2500 BLE Tool</h1>
-        <p>Connect to your B2500 device and manage its settings.</p>
+        <h1>Marstek BLE Tool</h1>
+        <p>
+          Connect to your Marstek battery or meter and manage its settings.
+          {family && ` Connected device: ${DEVICE_FAMILIES[family].label}.`}
+        </p>
       </header>
 
       <ConnectionPanel
@@ -1076,6 +1140,8 @@ const App: React.FC = () => {
         onAutoReconnectChange={setAutoReconnect}
         onAllowAnyDeviceChange={setAllowAnyDevice}
         onDeviceTypeChange={setDeviceType}
+        emulatorUrl={emulatorUrl}
+        onEmulatorUrlChange={setEmulatorUrl}
       />
 
       <div className="tabs">
@@ -1085,35 +1151,49 @@ const App: React.FC = () => {
         >
           Device Info
         </button>
-        <button
-          className={`tab-button ${activeTab === TabType.Runtime ? "active" : ""}`}
-          onClick={() => setActiveTab(TabType.Runtime)}
-        >
-          Runtime
-        </button>
-        <button
-          className={`tab-button ${activeTab === TabType.CellInfo ? "active" : ""}`}
-          onClick={() => setActiveTab(TabType.CellInfo)}
-        >
-          Cell Info
-        </button>
-        <button
-          className={`tab-button ${activeTab === TabType.Timers ? "active" : ""}`}
-          onClick={() => setActiveTab(TabType.Timers)}
-        >
-          Timers
-        </button>
+        {isB2500 && (
+          <button
+            className={`tab-button ${activeTab === TabType.Runtime ? "active" : ""}`}
+            onClick={() => setActiveTab(TabType.Runtime)}
+          >
+            Runtime
+          </button>
+        )}
+        {isB2500 && (
+          <button
+            className={`tab-button ${activeTab === TabType.CellInfo ? "active" : ""}`}
+            onClick={() => setActiveTab(TabType.CellInfo)}
+          >
+            Cell Info
+          </button>
+        )}
+        {isB2500 && (
+          <button
+            className={`tab-button ${activeTab === TabType.Timers ? "active" : ""}`}
+            onClick={() => setActiveTab(TabType.Timers)}
+          >
+            Timers
+          </button>
+        )}
         <button
           className={`tab-button ${activeTab === TabType.Configuration ? "active" : ""}`}
           onClick={() => setActiveTab(TabType.Configuration)}
         >
           Configuration
         </button>
+        {isB2500 && (
+          <button
+            className={`tab-button ${activeTab === TabType.DeviceControl ? "active" : ""}`}
+            onClick={() => setActiveTab(TabType.DeviceControl)}
+          >
+            Device Control
+          </button>
+        )}
         <button
-          className={`tab-button ${activeTab === TabType.DeviceControl ? "active" : ""}`}
-          onClick={() => setActiveTab(TabType.DeviceControl)}
+          className={`tab-button ${activeTab === TabType.FamilyStatus ? "active" : ""}`}
+          onClick={() => setActiveTab(TabType.FamilyStatus)}
         >
-          Device Control
+          {isB2500 ? "More" : "Status"}
         </button>
         <button
           className={`tab-button ${activeTab === TabType.Advanced ? "active" : ""}`}
@@ -1165,6 +1245,7 @@ const App: React.FC = () => {
             onSetWifiConfig={setWifiConfig}
             onSetMqttConfig={setMqttConfig}
             onResetMqttConfig={resetMqttConfig}
+            showMqtt={isB2500}
           />
         )}
 
@@ -1182,6 +1263,22 @@ const App: React.FC = () => {
             onGetWifiInfo={getWifiInfo}
             onGetErrorInfo={getErrorInfo}
             rawResponses={rawResponses}
+          />
+        )}
+
+        {activeTab === TabType.FamilyStatus && (
+          <FamilyStatusTab
+            // a new device starts with a fresh tab, not the last one's readings
+            key={selectedDevice?.id ?? "none"}
+            family={family ?? "b2500"}
+            isConnected={isConnected}
+            manager={deviceManagerRef.current}
+            log={(message) =>
+              setLogs((prev) => [
+                ...prev,
+                `${new Date().toLocaleTimeString()} - ${message}`,
+              ])
+            }
           />
         )}
 

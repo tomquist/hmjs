@@ -2,14 +2,18 @@ import React, { useState } from "react";
 
 interface BluetoothUnsupportedModalProps {
   isIOS: boolean;
+  /** Continue with a device emulated by marsemu, at this WebSocket URL */
+  onUseEmulator?: (url: string) => void;
 }
 
 const BLUEFY_APP_STORE_URL = "https://apps.apple.com/app/id1492822055";
 
 const BluetoothUnsupportedModal: React.FC<BluetoothUnsupportedModalProps> = ({
   isIOS,
+  onUseEmulator,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [emulatorUrl, setEmulatorUrl] = useState("ws://localhost:7101/");
 
   const pageUrl = typeof window !== "undefined" ? window.location.href : "";
 
@@ -114,6 +118,43 @@ const BluetoothUnsupportedModal: React.FC<BluetoothUnsupportedModalProps> = ({
                 Android device.
               </p>
             </>
+          )}
+          {onUseEmulator && (
+            <form
+              className="bluetooth-emulator"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (emulatorUrl.trim()) onUseEmulator(emulatorUrl.trim());
+              }}
+            >
+              <p>
+                Or use a device emulated by{" "}
+                <a
+                  href="https://github.com/tomquist/marsemu"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  marsemu
+                </a>{" "}
+                (<code>--ble-ws</code>), which needs no Bluetooth:
+              </p>
+              <div className="bluetooth-url-row">
+                <input
+                  id="unsupported-emulator-url"
+                  type="text"
+                  value={emulatorUrl}
+                  onChange={(e) => setEmulatorUrl(e.target.value)}
+                  aria-label="Emulator WebSocket URL"
+                />
+                <button
+                  type="submit"
+                  className="disclaimer-button bluetooth-copy-button"
+                  disabled={!emulatorUrl.trim()}
+                >
+                  Use emulator
+                </button>
+              </div>
+            </form>
           )}
         </div>
       </div>

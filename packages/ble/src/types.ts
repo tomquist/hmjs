@@ -3,8 +3,9 @@ type NotificationHandler = (response: unknown) => void;
 type NotificationHandlerMap = Record<number, NotificationHandler>;
 
 /**
- * "b2500"  – Marstek B2500 / 200-series firmware (default)
- *   Command: FF01, Status/Notify: FF02
+ * "b2500"  – Marstek devices (default): B2500, Venus, Venus E Mini, Jupiter
+ *   and the CT002/CT003 meters all use Command FF01, Status/Notify FF02. The
+ *   family is detected after connecting (see `getFamily()`).
  * "tronic" – Lidl Tronic / 100-series firmware (experimental)
  *   Command: FF03, Status/Notify: FF01
  */
@@ -13,7 +14,11 @@ type DeviceType = "b2500" | "tronic";
 interface BLEManagerOptions {
   autoReconnect?: boolean;
   reconnectDelay?: number;
-  deviceNamePrefix?: string;
+  /**
+   * Bluetooth name prefix(es) to offer in the device picker. Defaults to
+   * every Marstek family's prefix (`HM_` for the Tronic).
+   */
+  deviceNamePrefix?: string | string[];
   acceptAllDevices?: boolean;
   logger?: (message: string, ...args: unknown[]) => void;
   /**

@@ -49,6 +49,12 @@ export interface TimerInfoResponse {
   adaptiveModeEnabled: boolean;
   timers: TimerInfo[];
   smartMeter: SmartMeterInfo | null;
+  ct?: {
+    phase: number;
+    status: number;
+    phasePowers: [number, number, number];
+    meterType?: number;
+  };
 }
 
 export interface WifiMqttState {
@@ -103,6 +109,16 @@ export interface RuntimeInfo {
   temperatureLow: number;
   temperatureHigh: number;
   reserved1: number;
+  /** Charging temperature alarm (byte 37) */
+  chargingTemperatureAlarm?: number;
+  /** Discharging temperature alarm (byte 38) */
+  dischargingTemperatureAlarm?: number;
+  /** Bootloader version (newer firmware) */
+  bootloaderVersion?: number;
+  /** Two-device (group) mode on (newer firmware) */
+  twoDeviceMode?: boolean;
+  /** Surplus feed-in switched off (newer firmware) */
+  surplusFeedInDisabled?: boolean;
 
   // Extended fields
   dailyTotalBatteryCharge?: number;
@@ -139,14 +155,71 @@ export const COMMANDS = {
   RESTART_DEVICE: 0x25,
   RUN_DIAGNOSIS: 0x2a,
   GET_ERROR_INFO: 0x30,
+  /** Cloud region, see {@link B2500_REGION} */
+  SET_REGION: 0x02,
+  /** Wi-Fi signal (dBm) and SSID */
+  GET_WIFI_SIGNAL: 0x09,
+  /** Wi-Fi module firmware version */
+  GET_WIFI_MODULE_VERSION: 0x23,
+  /** Factory reset: the device forgets its Wi-Fi */
+  FACTORY_RESET: 0x26,
+  /** Rated output and input power */
+  GET_RATED_POWER: 0x2d,
+  /** Voltage and current of the host pack and each extension pack */
+  GET_BATTERY_PACKS: 0x2e,
+  /** Smart meter type and MAC */
+  SET_METER_TYPE: 0x31,
+  /** CT status: search state, phase, meter type, phase powers */
+  GET_CT_STATUS: 0x33,
+  /** Surplus feed-in: payload 0 = on, 1 = off */
+  SET_SURPLUS_FEED_IN: 0x35,
+  /** IP, gateway, netmask and DNS */
+  GET_NETWORK_INFO: 0x38,
 } as const;
 
-/** Charge modes accepted by {@link COMMANDS.SET_CHARGE_MODE} */
+/** Regions accepted by {@link COMMANDS.SET_REGION} (moves the cloud host). */
+export const B2500_REGION = {
+  EU: 0x00,
+  CHINA: 0x01,
+  /** Rest of the world (the US server) */
+  OTHER: 0x02,
+} as const;
+
+/**
+ * Smart meter codes accepted by {@link COMMANDS.SET_METER_TYPE} (the codes
+ * of the MQTT meter command; the device reports a different numbering).
+ */
+export const B2500_METER_TYPE = {
+  CT001: 0,
+  SHELLY_PRO_3EM: 1,
+  P1_METER: 2,
+  CT002: 3,
+  CT003: 4,
+  SHELLY_EM_GEN3: 5,
+  SHELLY_PRO_EM50: 6,
+  ECOTRACKER: 7,
+  SMR_P1: 8,
+  SMR_IR: 9,
+  SMR_TIC: 10,
+  TPM2_100CT: 11,
+} as const;
+
+/**
+ * Charging modes accepted by {@link COMMANDS.SET_CHARGE_MODE}.
+ *
+ * Despite the names (the app's own), the value is the charging mode: `HALF`
+ * (0) charges and discharges at the same time on a B2500 v2 (passes PV2
+ * through on a v1), `FULL` (1) fully charges first, then discharges.
+ */
 export const CHARGE_MODE = {
-  /** Charge the battery to half capacity */
+  /** v2: charge and discharge simultaneously; v1: PV2 pass-through */
   HALF: 0x00,
-  /** Charge the battery to full capacity */
+  /** Fully charge, then discharge */
   FULL: 0x01,
+  /** Alias of `HALF` */
+  SIMULTANEOUS: 0x00,
+  /** Alias of `FULL` */
+  FULL_THEN_DISCHARGE: 0x01,
 } as const;
 
 /**
@@ -585,6 +658,8 @@ export class HMDeviceProtocol {
         temperatureLow: dataView.getInt16(33, true),
         temperatureHigh: dataView.getInt16(35, true),
         reserved1: dataView.getUint16(37, true),
+        chargingTemperatureAlarm: dataView.getUint8(37),
+        dischargingTemperatureAlarm: dataView.getUint8(38),
       };
 
       // Check for extended data fields
@@ -605,6 +680,12 @@ export class HMDeviceProtocol {
 
         if (dataView.byteLength >= 52 + 4) {
           runtimeData.dailyTotalLoadDischarge = dataView.getUint32(52, true);
+        }
+
+        if (dataView.byteLength >= 60) {
+          runtimeData.bootloaderVersion = dataView.getUint8(56);
+          runtimeData.twoDeviceMode = dataView.getUint8(57) === 1;
+          runtimeData.surplusFeedInDisabled = dataView.getUint8(59) === 1;
         }
       }
 
@@ -726,6 +807,32 @@ export class HMDeviceProtocol {
         slotCount > 0
           ? this.parseSmartMeterInfo(rawPayload, SMART_METER_OFFSET)
           : null,
+      ct: this.parseTimerCtDetails(rawPayload),
+    };
+  }
+
+  /**
+   * The CT details firmware with five timer slots puts between slots 3 and 4
+   * (payload 29-38) and after slot 5 (payload 53).
+   */
+  private parseTimerCtDetails(
+    payload: Uint8Array,
+  ): TimerInfoResponse["ct"] | undefined {
+    if (payload.length < EXTENDED_TIMER_PAYLOAD_SIZE) return undefined;
+    const view = new DataView(
+      payload.buffer,
+      payload.byteOffset,
+      payload.byteLength,
+    );
+    return {
+      phase: payload[29],
+      status: payload[30],
+      phasePowers: [
+        view.getInt16(33, true),
+        view.getInt16(35, true),
+        view.getInt16(37, true),
+      ],
+      meterType: payload.length > 53 ? payload[53] : undefined,
     };
   }
 
@@ -759,6 +866,145 @@ export class HMDeviceProtocol {
       meterReading: view.getInt16(offset + 3, true),
       unknown: view.getUint16(offset + 5, true),
     };
+  }
+
+  /**
+   * Payload bytes of a reply frame: after the 4-byte header, up to the
+   * checksum. Several B2500 replies (0x03, 0x09, 0x30, 0x33) come with a
+   * wrong length byte or without a checksum, so `hasChecksum` says whether
+   * to drop the last byte.
+   */
+  private replyPayload(frame: Uint8Array, hasChecksum?: boolean): Uint8Array {
+    // Unless told, strip the last byte only if it is the XOR of the others.
+    const withChecksum =
+      hasChecksum ??
+      (frame.length > 4 &&
+        this.calculateChecksum(frame.subarray(0, -1)) ===
+          frame[frame.length - 1]);
+    return frame.slice(4, withChecksum ? frame.length - 1 : frame.length);
+  }
+
+  /** Decode `0x09`: signal in dBm (int16) and SSID. The frame has no checksum. */
+  public parseWifiSignal(frame: Uint8Array): { rssi: number; ssid: string } {
+    const p = this.replyPayload(frame, false);
+    if (p.length < 2) return { rssi: 0, ssid: "" };
+    const rssi = new DataView(p.buffer, p.byteOffset, 2).getInt16(0, true);
+    return {
+      rssi,
+      ssid: this.bytesToString(p.subarray(2)).replace(/\0+$/, ""),
+    };
+  }
+
+  /** Decode `0x23`: the Wi-Fi module's firmware version. */
+  public parseWifiModuleVersion(frame: Uint8Array): string {
+    return this.bytesToString(this.replyPayload(frame)).replace(/\0.*$/, "");
+  }
+
+  /** Decode `0x2D`: rated output and input power in W. */
+  public parseRatedPower(frame: Uint8Array): {
+    outputPower: number;
+    inputPower: number;
+  } {
+    const p = this.replyPayload(frame);
+    const view = new DataView(p.buffer, p.byteOffset, p.byteLength);
+    return {
+      outputPower: p.length >= 2 ? view.getUint16(0, true) : 0,
+      inputPower: p.length >= 4 ? view.getUint16(2, true) : 0,
+    };
+  }
+
+  /**
+   * Decode `0x2E`: voltage (V), current (A) and two temperatures (°C) of the
+   * host pack and up to two extension packs; absent packs are left out.
+   */
+  public parseBatteryPacks(frame: Uint8Array): Array<{
+    index: number;
+    voltage: number;
+    current: number;
+    temperatures: [number, number];
+  }> {
+    const p = this.replyPayload(frame);
+    const view = new DataView(p.buffer, p.byteOffset, p.byteLength);
+    const packs = [];
+    for (let i = 0; i < 3 && 12 * i + 12 <= p.length; i++) {
+      const o = 12 * i;
+      const mv = view.getUint32(o, true);
+      if (mv === 0) continue;
+      packs.push({
+        index: i,
+        voltage: mv / 1000,
+        current: view.getInt32(o + 4, true) / 1000,
+        temperatures: [
+          view.getInt16(o + 8, true),
+          view.getInt16(o + 10, true),
+        ] as [number, number],
+      });
+    }
+    return packs;
+  }
+
+  /**
+   * Decode `0x33`: CT search state, connection state, detected phase, meter
+   * type (reported numbering), the three CT phase powers, the grid power
+   * the device regulates on and its total output, in W. No checksum.
+   */
+  public parseCtStatus(frame: Uint8Array): {
+    searchState: number;
+    connectionState: number;
+    phase: number;
+    meterType: number;
+    phasePowers: [number, number, number];
+    gridPower: number;
+    outputPower: number;
+  } | null {
+    const p = this.replyPayload(frame, false);
+    if (p.length < 14) return null;
+    const view = new DataView(p.buffer, p.byteOffset, p.byteLength);
+    return {
+      searchState: p[0],
+      connectionState: p[1],
+      phase: p[2],
+      meterType: p[3],
+      phasePowers: [
+        view.getInt16(4, true),
+        view.getInt16(6, true),
+        view.getInt16(8, true),
+      ],
+      gridPower: view.getInt16(10, true),
+      outputPower: view.getUint16(12, true),
+    };
+  }
+
+  /** Decode `0x38`: `ip<.,.>gateway<.,.>netmask<.,.>dns`. */
+  public parseNetworkInfo(frame: Uint8Array): {
+    ip?: string;
+    gateway?: string;
+    netmask?: string;
+    dns?: string;
+  } {
+    const [ip, gateway, netmask, dns] = this.bytesToString(
+      this.replyPayload(frame),
+    )
+      .replace(/\0+$/, "")
+      .split("<.,.>");
+    return { ip, gateway, netmask, dns };
+  }
+
+  /**
+   * Payload of {@link COMMANDS.SET_METER_TYPE}: the meter code and the
+   * meter's MAC as 12 hex characters (zeros for a CT001).
+   */
+  public createMeterTypePayload(
+    meterType: number,
+    mac: string = "",
+  ): Uint8Array {
+    this.validateByteRange(meterType, 0, 11, "Meter type");
+    const clean = mac.replace(/[:-]/g, "").toLowerCase();
+    const text = clean === "" ? "000000000000" : clean;
+    if (!/^[0-9a-f]{12}$/.test(text)) {
+      throw new Error("Meter MAC must be 12 hex digits");
+    }
+    return new Uint8Array([meterType, ...this.stringToBytes(text)]);
   }
 
   /**
@@ -863,35 +1109,49 @@ export class HMDeviceProtocol {
   /**
    * Create a date/time command payload
    *
-   * The device uses the C `struct tm` convention, so the year is offset by
-   * {@link DATETIME_YEAR_EPOCH} and the month is zero-based. Two trailing
-   * zero bytes follow the six date fields.
+   * The device keeps UTC: the six date fields are the UTC time in the C
+   * `struct tm` convention (year offset by {@link DATETIME_YEAR_EPOCH},
+   * zero-based month), followed by the offset to local time in minutes
+   * (int16, little-endian), which the device applies to its timers. This is
+   * what the app sends.
    *
    * @param date Date to write; defaults to now
+   * @param utcOffsetMinutes Local time minus UTC, in minutes; defaults to
+   *   this machine's offset at `date`
    * @returns Payload bytes
    */
-  public createDateTimePayload(date: Date = new Date()): Uint8Array {
+  public createDateTimePayload(
+    date: Date = new Date(),
+    utcOffsetMinutes: number = -date.getTimezoneOffset(),
+  ): Uint8Array {
     // An invalid Date returns NaN from every accessor, which passes the range
     // check below and then encodes as zero, so reject it up front.
     if (Number.isNaN(date.getTime())) {
       throw new Error("Date must be a valid Date");
     }
 
-    const year = date.getFullYear() - DATETIME_YEAR_EPOCH;
+    const year = date.getUTCFullYear() - DATETIME_YEAR_EPOCH;
     if (year < 0 || year > 255) {
       throw new Error(
         `Year must be between ${DATETIME_YEAR_EPOCH} and ${DATETIME_YEAR_EPOCH + 255}`,
       );
     }
+    this.validateByteRange(
+      utcOffsetMinutes,
+      -14 * 60,
+      14 * 60,
+      "UTC offset in minutes",
+    );
+    const offset = utcOffsetMinutes & 0xffff;
     return new Uint8Array([
       year,
-      date.getMonth(),
-      date.getDate(),
-      date.getHours(),
-      date.getMinutes(),
-      date.getSeconds(),
-      0,
-      0,
+      date.getUTCMonth(),
+      date.getUTCDate(),
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds(),
+      offset & 0xff,
+      offset >> 8,
     ]);
   }
 

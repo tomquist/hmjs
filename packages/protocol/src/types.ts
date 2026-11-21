@@ -91,6 +91,20 @@ export interface TimerInfoResponse {
   timers: TimerInfo[];
   /** Smart meter state, or null if the payload was too short to parse */
   smartMeter: SmartMeterInfo | null;
+  /** CT details, on firmware that sends the longer reply */
+  ct?: CtTimerDetails;
+}
+
+/** CT details in the timer reply (`0x13`) */
+export interface CtTimerDetails {
+  /** Connected phase (1-3; 255 = not determined) */
+  phase: number;
+  /** CT status code */
+  status: number;
+  /** CT phase 1-3 power in W */
+  phasePowers: [number, number, number];
+  /** Meter type in the device's reported numbering, if sent */
+  meterType?: number;
 }
 
 /**
@@ -191,6 +205,16 @@ export interface RuntimeInfo {
   temperatureHigh: number;
   /** Reserved data field */
   reserved1: number;
+  /** Charging temperature alarm (byte 37) */
+  chargingTemperatureAlarm?: number;
+  /** Discharging temperature alarm (byte 38) */
+  dischargingTemperatureAlarm?: number;
+  /** Bootloader version (newer firmware) */
+  bootloaderVersion?: number;
+  /** Two-device (group) mode on (newer firmware) */
+  twoDeviceMode?: boolean;
+  /** Surplus feed-in switched off (newer firmware) */
+  surplusFeedInDisabled?: boolean;
 
   // Extended fields (optional)
   /** Daily total battery charge (Wh * 10) */

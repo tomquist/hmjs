@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Support for the other Marstek devices: Venus C/E, Venus E 3.0/A/D, Venus E
+  Mini, Jupiter C/E/C Plus and the CT002/CT003 meters. The demo finds them,
+  sets up their Wi-Fi, and shows their status, battery and cell voltages,
+  grid and PV readings where the device reports them, and lets you change
+  their working mode, schedule and settings (depth of discharge, LED,
+  Bluetooth, surplus feed-in, local API, power limits and more, per model).
+- Try the demo and the library without a device: they connect to a device
+  emulated by [marsemu](https://github.com/tomquist/marsemu) when given its
+  WebSocket address (`?emulator=ws://localhost:7101/`, or
+  `createEmulatorBluetooth`), in any browser.
+- B2500: Wi-Fi signal, Wi-Fi module version, battery pack voltages, CT
+  status, rated power and network info, and settings for region, smart
+  meter, surplus feed-in and factory reset. CT002/CT003: status with phase
+  powers and energy, phase readings, direction, reader settings and restart.
 - Ten more device commands, with typed `BLEDeviceManager` methods: read WiFi
   info (`0x08`), set depth of discharge (`0x0B`), set discharge threshold
   (`0x0C`), set charge mode (`0x0D`), set output channels (`0x0E`), set
@@ -23,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 ### Removed
 ### Fixed
+- `setAdaptiveMode(false)` switched adaptive mode on: the device ignores the
+  value. It now throws and points to `setTimers`, which is the way back.
+- `setDateTime` now sends UTC with the time-zone offset, as the app does,
+  instead of local time with a zero offset.
+- A pending automatic reconnect no longer takes over a newer connection, or
+  reconnects after you disconnected.
 - Restore the demo's reconnect-on-drift path in the remaining eight command
   handlers. They guarded on `_selectedDevice`, which `BLEDeviceManager` does
   not have - its device lives in a private `device` field - so the guard was

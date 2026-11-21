@@ -35,7 +35,6 @@ const DeviceControlTab: React.FC<DeviceControlTabProps> = ({
   const [chargeMode, setChargeMode] = useState<number>(CHARGE_MODE.FULL);
   const [out1, setOut1] = useState(true);
   const [out2, setOut2] = useState(true);
-  const [adaptive, setAdaptive] = useState(true);
 
   const channelMask =
     (out1 ? OUTPUT_CHANNEL.OUT1 : 0) | (out2 ? OUTPUT_CHANNEL.OUT2 : 0);
@@ -102,8 +101,12 @@ const DeviceControlTab: React.FC<DeviceControlTabProps> = ({
             value={chargeMode}
             onChange={(e) => setChargeMode(Number(e.target.value))}
           >
-            <option value={CHARGE_MODE.FULL}>Full</option>
-            <option value={CHARGE_MODE.HALF}>Half</option>
+            <option value={CHARGE_MODE.FULL_THEN_DISCHARGE}>
+              Fully charge, then discharge
+            </option>
+            <option value={CHARGE_MODE.SIMULTANEOUS}>
+              Charge and discharge together (v1: PV2 pass-through)
+            </option>
           </select>
           <button
             type="button"
@@ -144,22 +147,17 @@ const DeviceControlTab: React.FC<DeviceControlTabProps> = ({
         </div>
 
         <div className="form-group">
-          <label htmlFor="adaptive-checkbox" className="checkbox-label">
-            <input
-              type="checkbox"
-              id="adaptive-checkbox"
-              checked={adaptive}
-              onChange={(e) => setAdaptive(e.target.checked)}
-            />
-            Adaptive mode
-          </label>
           <button
             type="button"
-            onClick={() => onSetAdaptiveMode(adaptive)}
+            onClick={() => onSetAdaptiveMode(true)}
             disabled={!isConnected}
           >
-            Set Adaptive Mode
+            Switch to Adaptive Mode
           </button>
+          <small>
+            {" "}
+            Writing the timers (Timers tab) switches back to timer mode.
+          </small>
         </div>
       </div>
 

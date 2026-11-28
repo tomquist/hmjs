@@ -15,6 +15,7 @@ A TypeScript library for communicating with Marstek (Hame) devices via Bluetooth
 | [AstraMeter](https://github.com/tomquist/astrameter) | Tells your battery your live grid usage (read from your existing meter) so it charges and discharges to avoid buying or selling power |
 | **hmjs** (this repo) | Sets up and configures Marstek batteries and meters over Bluetooth, right from your web browser, with no app or account needed |
 | [esphome-b2500](https://github.com/tomquist/esphome-b2500) | Continuously monitors and controls a B2500 over Bluetooth using a small ESP32 board |
+| [marsemu](https://github.com/tomquist/marsemu) | Runs the real firmware of Marstek batteries and meters on your computer, so you can try your smart home setup without touching a real device |
 <!-- marstek-family:end -->
 
 ## Overview
